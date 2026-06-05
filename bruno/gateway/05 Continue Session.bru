@@ -1,0 +1,40 @@
+meta {
+  name: 05 Continue Session
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/v1/responses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "session_id": "{{sessionId}}",
+    "input": "In one short sentence, what did I just ask you to say?",
+    "reasoning_effort": "low"
+  }
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("same session, completed", function () {
+    expect(res.body.session_id).to.equal(bru.getEnvVar("sessionId"));
+    expect(res.body.status).to.equal("completed");
+  });
+}
+
+docs {
+  Continue the conversation from Create Response: reuse `session_id` and send
+  only the new `input`. The session keeps the full history, so you never resend
+  the transcript.
+}

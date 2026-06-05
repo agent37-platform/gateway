@@ -1,0 +1,17 @@
+meta {
+  name: 08 Reconnect Stream
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/v1/responses/{{responseId}}/stream
+  body: none
+  auth: none
+}
+
+docs {
+  Reconnect to a response's stream. Replays a snapshot of everything so far,
+  then resumes live — so a dropped connection never loses the answer. For a
+  response that already finished, it replays the snapshot and ends.
+}

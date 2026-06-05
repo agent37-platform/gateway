@@ -1,0 +1,21 @@
+meta {
+  name: 06 Get Response
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/v1/responses/{{responseId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("matches the created response", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("responseId"));
+  });
+}

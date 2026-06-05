@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Editor / OS
+.vscode/
+.DS_Store
+
+# Workspace collaboration dir (Conductor)
+.context/
