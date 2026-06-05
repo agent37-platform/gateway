@@ -1,1 +1,2 @@
-environments/local.bru
+environments/*.bru
+!environments/*.example.bru
