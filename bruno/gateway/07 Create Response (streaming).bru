@@ -1,0 +1,36 @@
+meta {
+  name: 07 Create Response (streaming)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/v1/responses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": "Count from 1 to 5, one number per line.",
+    "reasoning_effort": "low",
+    "stream": true
+  }
+}
+
+docs {
+  With `stream: true` the gateway returns Server-Sent Events:
+    response.created -> response.reasoning.delta / response.output_text.delta /
+    response.tool_call.* -> response.completed (or response.failed)
+
+  Bruno shows the assembled event stream in the Response pane. For raw frames,
+  curl is handy:
+
+    curl -N localhost:3737/v1/responses \
+      -H 'content-type: application/json' \
+      -d '{"input":"hi","stream":true}'
+}

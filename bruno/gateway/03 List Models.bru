@@ -1,0 +1,26 @@
+meta {
+  name: 03 List Models
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/v1/models
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("has a model list", function () {
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The models this instance's agent can run on. Pass any `id` as `model`
+  (with its `provider`) on a Create Response call.
+}

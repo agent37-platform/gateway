@@ -1,0 +1,17 @@
+meta {
+  name: 02 Version
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/v1/version
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

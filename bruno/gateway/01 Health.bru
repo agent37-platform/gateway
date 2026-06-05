@@ -1,0 +1,27 @@
+meta {
+  name: 01 Health
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/v1/health
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("agent reachable", function () {
+    expect(res.body.ok).to.equal(true);
+    expect(res.body.hermes).to.equal(true);
+  });
+}
+
+docs {
+  Liveness + whether the Hermes worker is reachable.
+  No auth — the gateway runs on localhost behind the host/Docker.
+}

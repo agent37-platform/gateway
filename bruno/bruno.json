@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Agent37 Gateway",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

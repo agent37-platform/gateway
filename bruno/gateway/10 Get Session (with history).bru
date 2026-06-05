@@ -1,0 +1,27 @@
+meta {
+  name: 10 Get Session (with history)
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions/{{sessionId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("includes transcript history", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("sessionId"));
+    expect(res.body.history).to.be.an("array");
+  });
+}
+
+docs {
+  The session plus its full transcript, projected on demand from Hermes'
+  SessionDB (the gateway never duplicates messages).
+}

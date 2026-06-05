@@ -1,0 +1,26 @@
+meta {
+  name: 12 Delete Session
+  type: http
+  seq: 12
+}
+
+delete {
+  url: {{baseUrl}}/v1/sessions/{{sessionId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("deleted", function () {
+    expect(res.body.deleted).to.equal(true);
+  });
+}
+
+docs {
+  Permanently remove the conversation and its history. Other sessions on the
+  instance are untouched.
+}

@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "../dist/server",
+    "rootDir": "..",
+    "resolveJsonModule": true,
+    "declaration": false
+  },
+  "include": [".", "../shared"]
+}
