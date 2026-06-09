@@ -87,8 +87,8 @@ Non-streaming returns the finished response object:
 
 ```jsonc
 {
-  "id": "resp_…",
-  "session_id": "sess_…",
+  "id": "…",
+  "session_id": "…",
   "status": "completed",          // in_progress | completed | failed | cancelled
   "agent": "hermes",
   "model": null,
@@ -179,7 +179,7 @@ error bodies.
 A [Bruno](https://www.usebruno.com/) collection lives in [`bruno/`](bruno/) —
 open that folder in Bruno, pick the **local** environment (`baseUrl`
 `http://localhost:3737`), and run the requests top to bottom. *Create Response*
-saves the `session_id` and `resp_` id into the environment, so *Continue
+saves the `session_id` and response id into the environment, so *Continue
 Session*, *Get Response*, *Cancel*, and *Delete Session* just work.
 
 ## Configuration
