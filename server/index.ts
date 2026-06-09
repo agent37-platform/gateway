@@ -8,7 +8,9 @@ import { shutdownLiveRuns } from './live-runs.js';
 
 const PORT = parseInt(process.env.PORT || '3737', 10);
 const HOST = process.env.HOST || '0.0.0.0';
-const PORT_FALLBACK_ATTEMPTS = 20;
+// An explicit PORT must bind exactly: behind the platform edge the route points
+// at one port, so silently falling back would strand the instance URL.
+const PORT_FALLBACK_ATTEMPTS = process.env.PORT ? 1 : 20;
 
 const httpServer = createServer(app);
 let shuttingDown = false;

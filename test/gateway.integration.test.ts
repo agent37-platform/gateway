@@ -32,8 +32,8 @@ async function jsonOk<T>(res: Response): Promise<T> {
 }
 
 function assertCompleted(body: ResponseBody): void {
-  assert.match(body.id, /^resp_/);
-  assert.match(body.session_id, /^sess_/);
+  assert.match(body.id, /^[a-f0-9]{32}$/);
+  assert.match(body.session_id, /^[a-f0-9]{32}$/);
   assert.equal(body.status, 'completed');
   assert.equal(body.agent, 'hermes');
   assert.ok(body.output_text.trim().length > 0);
@@ -162,11 +162,11 @@ test('validation and not-found errors stay stable', async () => {
   assert.equal(goal.status, 400);
   assert.equal((await goal.json()).error.param, 'mode');
 
-  const response = await fetch(`${base}/v1/responses/resp_missing`);
+  const response = await fetch(`${base}/v1/responses/missing`);
   assert.equal(response.status, 404);
   assert.equal((await response.json()).error.code, 'response_not_found');
 
-  const session = await fetch(`${base}/v1/sessions/sess_missing`);
+  const session = await fetch(`${base}/v1/sessions/missing`);
   assert.equal(session.status, 404);
   assert.equal((await session.json()).error.code, 'session_not_found');
 
