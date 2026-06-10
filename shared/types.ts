@@ -104,6 +104,19 @@ export interface SessionWithHistory extends SessionObject {
 }
 
 // ---------------------------------------------------------------------------
+// Public API: files
+// ---------------------------------------------------------------------------
+
+/** The result of POST /v1/files. `path` is the file's absolute location in the
+ *  agent's workspace — pass it back in `files` on POST /v1/responses, or to
+ *  GET /v1/files/content to download it. */
+export interface FileUploadResult {
+  path: string;
+  filename: string;
+  bytes: number;
+}
+
+// ---------------------------------------------------------------------------
 // Public API: streaming events (Server-Sent Events)
 // ---------------------------------------------------------------------------
 

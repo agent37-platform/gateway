@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import { Router } from 'express';
 import {
   DEFAULT_AGENT,
@@ -6,6 +7,7 @@ import {
   SUPPORTED_AGENTS,
 } from '../../shared/types.js';
 import { isRecord, responseNotFound, validationError } from '../errors.js';
+import { resolveHomeAwarePath } from '../paths.js';
 import { initSSE, writeStreamEvent } from '../sse.js';
 import { attach, hasRun } from '../live-runs.js';
 import { getResponse, setResponseStatus } from '../db/queries.js';
@@ -55,6 +57,33 @@ function optionalEnum<T extends string>(
   return value as T;
 }
 
+/** Validate `files` attachment paths: each must name an existing regular file
+ *  on this instance. Returns resolved absolute paths. */
+function parseFiles(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || !value.every((p) => typeof p === 'string' && p.trim())) {
+    throw validationError('files must be an array of file paths.', 'files');
+  }
+  return value.map((p: string) => {
+    const path = resolveHomeAwarePath(p);
+    let stats;
+    try {
+      stats = statSync(path);
+    } catch {
+      throw validationError(`files entry '${p}' does not exist on this instance.`, 'files', 'Upload it first via POST /v1/files.');
+    }
+    if (!stats.isFile()) throw validationError(`files entry '${p}' is not a file.`, 'files');
+    return path;
+  });
+}
+
+/** Append attachment paths to the message the same way minions does — the
+ *  agent reads them from disk (its cwd is the workspace). */
+function withAttachedFiles(input: string, files: string[]): string {
+  if (files.length === 0) return input;
+  return `${input}\n\n[Attached files:\n${files.map((p) => `- ${p}`).join('\n')}]`;
+}
+
 function parseResponseBody(body: unknown): { request: ResponseRequest; stream: boolean } {
   const b = isRecord(body) ? body : {};
 
@@ -62,6 +91,8 @@ function parseResponseBody(body: unknown): { request: ResponseRequest; stream: b
   if (typeof input !== 'string' || !input.trim()) {
     throw validationError('input is required and must be a non-empty string.', 'input');
   }
+
+  const files = parseFiles(b.files);
 
   let sessionId: string | undefined;
   if (b.session_id !== undefined && b.session_id !== null) {
@@ -99,7 +130,15 @@ function parseResponseBody(body: unknown): { request: ResponseRequest; stream: b
   // container is the Cloud layer's job; inside the container there is one gateway.
 
   return {
-    request: { sessionId, input, agent, model, provider, reasoningEffort, metadata },
+    request: {
+      sessionId,
+      input: withAttachedFiles(input, files),
+      agent,
+      model,
+      provider,
+      reasoningEffort,
+      metadata,
+    },
     stream: b.stream === true,
   };
 }

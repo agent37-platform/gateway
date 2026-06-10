@@ -77,6 +77,7 @@ behind the host, which handles and forwards authentication.
 | --- | --- | --- |
 | `input` | string, required | The message or task. |
 | `session_id` | string | Continue a conversation. Omit to start a new one. |
+| `files` | string[] | Absolute paths of files to attach (from `POST /v1/files`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
 | `model` / `provider` | string | The LLM to run on. List options at `GET /v1/models`. |
 | `reasoning_effort` | string | `none` … `xhigh`. |
@@ -130,6 +131,35 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 | Retrieve, with history | `GET /v1/sessions/{id}` |
 | Delete | `DELETE /v1/sessions/{id}` |
 
+### Files
+
+Files live on the instance's disk, in the agent's workspace
+(`<home>/workspace`) — the worker's working directory. A path is the file's
+identity; there are no file ids.
+
+| Action | Endpoint |
+| --- | --- |
+| Upload (multipart, one file in a `file` field) | `POST /v1/files` → `{ path, filename, bytes }` |
+| Download (e.g. a file the agent produced) | `GET /v1/files/content?path=…` |
+
+The chat loop: upload, pass the returned `path` in `files` on
+`POST /v1/responses`, and when the agent replies that it wrote a file, fetch
+that path from `/v1/files/content`.
+
+```bash
+curl -F "file=@leads.csv" http://localhost:3737/v1/files
+# → { "path": "/home/user/.agent37-gateway/workspace/uploads/3f2a1b9c-leads.csv", … }
+
+curl http://localhost:3737/v1/responses -H 'content-type: application/json' -d '{
+  "input": "Summarize the attached spreadsheet.",
+  "files": ["/home/user/.agent37-gateway/workspace/uploads/3f2a1b9c-leads.csv"]
+}'
+```
+
+Uploads are kept until you delete them from the workspace yourself (there is no
+garbage collection), and stored paths assume the instance's home directory
+stays stable.
+
 ### Models & health
 
 | Action | Endpoint |
@@ -152,6 +182,7 @@ Every error returns a stable, machine-readable body. Branch on `code`, show
 | `validation_error` | 400 | A request field was invalid (see `param`). |
 | `session_not_found` | 404 | No session with that id. |
 | `response_not_found` | 404 | No response with that id. |
+| `file_not_found` | 404 | No file at that path. |
 | `not_found` | 404 | Unknown route. |
 | `session_busy` | 409 | A response is already running on the session. |
 | `payload_too_large` | 413 | Request body exceeded the size limit. |
@@ -180,7 +211,9 @@ A [Bruno](https://www.usebruno.com/) collection lives in [`bruno/`](bruno/) —
 open that folder in Bruno, pick the **local** environment (`baseUrl`
 `http://localhost:3737`), and run the requests top to bottom. *Create Response*
 saves the `session_id` and response id into the environment, so *Continue
-Session*, *Get Response*, *Cancel*, and *Delete Session* just work.
+Session*, *Get Response*, *Cancel*, and *Delete Session* just work. For
+*Upload File*, pick any local file first; it saves the uploaded path for
+*Download File*.
 
 ## Configuration
 

@@ -1,0 +1,40 @@
+meta {
+  name: 13 Upload File
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{baseUrl}}/v1/files
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  file: @file()
+}
+
+script:post-response {
+  if (res.status === 200 && res.body && res.body.path) {
+    bru.setEnvVar("uploadedFilePath", res.body.path, { persist: true });
+  }
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("returns the workspace path", function () {
+    expect(res.body.path).to.be.a("string");
+    expect(res.body.filename).to.be.a("string");
+    expect(res.body.bytes).to.be.a("number");
+  });
+}
+
+docs {
+  Pick any local file for the `file` field, then run. The returned `path`
+  (saved to the env as `uploadedFilePath`) is the file's identity — attach it
+  to a turn by adding `"files": ["{{uploadedFilePath}}"]` to Create Response,
+  or download it back with 14 Download File.
+}
