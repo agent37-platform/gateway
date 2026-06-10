@@ -95,6 +95,11 @@ function formatWorkerError(error: string | WorkerErrorPayload | undefined): stri
   return `${code}${error.message}${hint}`;
 }
 
+function workerErrorMessage(error: string | WorkerErrorPayload | undefined): string {
+  if (!error) return 'Hermes worker error';
+  return typeof error === 'string' ? error : error.message;
+}
+
 function workerErrorCode(error: string | WorkerErrorPayload | undefined): string | undefined {
   return typeof error === 'object' ? error.code : undefined;
 }
@@ -442,7 +447,7 @@ export class HermesWorkerAdapter implements AgentAdapter, GoalCapableAdapter {
         case 'error':
           yield {
             type: 'error',
-            error: formatWorkerError(event.error),
+            error: workerErrorMessage(event.error),
             code: workerErrorCode(event.error),
             hint: workerErrorHint(event.error),
           };

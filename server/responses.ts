@@ -150,9 +150,13 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
           emitToolProgress(responseId, event);
           break;
         case 'done':
+          // The worker closes every turn with a trailing `done`, including
+          // after an `error` event — a reported failure must stay failed.
           sawTerminal = true;
-          usage = event.usage ?? null;
-          status = event.interrupted ? 'cancelled' : 'completed';
+          if (status !== 'failed') {
+            usage = event.usage ?? null;
+            status = event.interrupted ? 'cancelled' : 'completed';
+          }
           break;
         case 'error':
           sawTerminal = true;
