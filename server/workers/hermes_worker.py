@@ -168,6 +168,9 @@ def _error_payload(exc: BaseException) -> dict[str, str]:
     elif "rate limit" in lower or "429" in lower:
         code = "rate_limit"
         hint = "Retry later or switch provider/model."
+    elif "instance_budget_exhausted" in lower or "insufficient_balance" in lower:
+        code = "quota_exhausted"
+        hint = "Raise the instance budget or top up the workspace balance."
     elif "quota" in lower or "credit" in lower or "insufficient" in lower:
         code = "quota_exhausted"
         hint = "Top up provider account or switch provider/model."
@@ -1313,6 +1316,14 @@ def _run_chat(request_id: str, request: dict[str, Any]) -> None:
         return
 
     final_text = str(result.get("final_response") or "")
+    if result.get("failed") and not final_text:
+        # The agent's run loop aborted (e.g. every provider call was refused)
+        # without producing a reply. Surface it as an error instead of letting
+        # the turn settle as an empty success.
+        error_text = str(result.get("error") or "") or "The agent run failed without producing a response."
+        payload = _error_payload(RuntimeError(error_text))
+        raise WorkerError(error_text, code=payload["code"], hint=payload.get("hint"))
+
     failure_message = _agent_failure_message(final_text)
     if failure_message:
         raise WorkerError(failure_message, code="provider_error")
