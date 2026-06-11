@@ -16,7 +16,7 @@ import type {
   ResponseStreamEvent,
   TurnUsage,
 } from '../shared/types.js';
-import { adapter } from './agent.js';
+import { getAdapter } from './agent.js';
 import {
   activeResponseForSession,
   createRun,
@@ -55,6 +55,7 @@ export interface ResponseRequest {
 export interface BegunResponse {
   responseId: string;
   sessionId: string;
+  agent: AgentName;
   settings: AgentRunSettings;
   model: string | null;
   provider: string | null;
@@ -103,7 +104,7 @@ export function beginResponse(req: ResponseRequest): BegunResponse {
     reasoningEffort: req.reasoningEffort ?? undefined,
   };
 
-  return { responseId, sessionId, settings, model: req.model, provider: req.provider };
+  return { responseId, sessionId, agent: req.agent, settings, model: req.model, provider: req.provider };
 }
 
 function emitToolProgress(responseId: string, event: StreamEvent): void {
@@ -124,7 +125,7 @@ function emitToolProgress(responseId: string, event: StreamEvent): void {
  * those become a `failed` response.
  */
 export async function driveResponse(begun: BegunResponse, input: string): Promise<ResponseObject> {
-  const { responseId, sessionId, settings, model, provider } = begun;
+  const { responseId, sessionId, agent, settings, model, provider } = begun;
 
   let outputText = '';
   let usage: TurnUsage | null = null;
@@ -133,7 +134,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
   let sawTerminal = false;
 
   try {
-    for await (const event of adapter.chatStream(sessionId, input, { settings })) {
+    for await (const event of getAdapter(agent).chatStream(sessionId, input, { settings })) {
       switch (event.type) {
         case 'text_delta':
           if (event.content) {
@@ -164,7 +165,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
   } catch (error) {
     sawTerminal = true;
     status = 'failed';
-    apiError = apiErrorFromUnknown(error, 'Hermes chat stream failed');
+    apiError = apiErrorFromUnknown(error, 'Agent chat stream failed');
   }
 
   // A stream that ended without an explicit terminal event: treat what we have
@@ -219,7 +220,7 @@ export async function cancelResponse(responseId: string): Promise<ResponseObject
   const response = getResponse(responseId);
   if (!response) throw responseNotFound(responseId);
   if (response.status === 'in_progress') {
-    await adapter.interruptChat(response.session_id);
+    await getAdapter(response.agent).interruptChat(response.session_id);
   }
   return getResponse(responseId) ?? response;
 }

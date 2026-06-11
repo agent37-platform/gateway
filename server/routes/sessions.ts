@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { SessionMessage } from '../../shared/types.js';
-import { adapter } from '../agent.js';
+import { getAdapter } from '../agent.js';
 import { gatewayErrorFromWorker, sessionNotFound } from '../errors.js';
 import {
   deleteResponsesForSession,
@@ -27,7 +27,7 @@ sessionsRouter.get('/:id', async (req, res, next) => {
   }
 
   try {
-    const messages = await adapter.getMessages(session.id);
+    const messages = await getAdapter(session.agent).getMessages(session.id);
     const history: SessionMessage[] = messages.map((m) => ({
       id: m.id,
       session_id: session.id,
@@ -49,7 +49,7 @@ sessionsRouter.delete('/:id', async (req, res, next) => {
 
   // Best-effort removal of the Hermes transcript before dropping our records.
   try {
-    await adapter.deleteSession(session.id);
+    await getAdapter(session.agent).deleteSession(session.id);
   } catch {
     // The gateway's own records still get cleaned up below.
   }

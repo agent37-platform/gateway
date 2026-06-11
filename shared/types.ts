@@ -17,8 +17,7 @@ export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 export const RESPONSE_MODES = ['chat', 'goal'] as const;
 export type ResponseMode = (typeof RESPONSE_MODES)[number];
 
-/** The only agent this build routes to. */
-export const SUPPORTED_AGENTS = ['hermes'] as const;
+export const SUPPORTED_AGENTS = ['hermes', 'openclaw'] as const;
 export type AgentName = (typeof SUPPORTED_AGENTS)[number];
 export const DEFAULT_AGENT: AgentName = 'hermes';
 
