@@ -8,7 +8,7 @@ import {
 import { isRecord, responseNotFound, validationError } from '../errors.js';
 import { initSSE, writeStreamEvent } from '../sse.js';
 import { attach, hasRun } from '../live-runs.js';
-import { getResponse } from '../db/queries.js';
+import { getResponse, setResponseStatus } from '../db/queries.js';
 import {
   beginResponse,
   cancelResponse,
@@ -18,6 +18,17 @@ import {
 } from '../responses.js';
 
 export const responsesRouter = Router();
+
+// A non-streaming turn sends its response headers only when the turn finishes, and every
+// hop to the client caps how long it will wait for headers (~100s at Cloudflare's edge,
+// not configurable) — which used to kill stream:false turns longer than that. So the
+// route commits its headers immediately and ticks a whitespace heartbeat while the turn
+// runs: leading whitespace before a JSON document is valid JSON (RFC 8259), so clients
+// parse the body unchanged. Env override exists so tests can tighten the cadence; the
+// 50ms floor keeps a typo'd value from becoming a whitespace flood (Node clamps NaN/0
+// intervals to 1ms).
+const heartbeatEnv = parseInt(process.env.GATEWAY_NONSTREAM_HEARTBEAT_MS || '', 10);
+const NONSTREAM_HEARTBEAT_MS = Number.isFinite(heartbeatEnv) && heartbeatEnv >= 50 ? heartbeatEnv : 25_000;
 
 function optionalString(value: unknown, field: string): string | null {
   if (value === undefined || value === null) return null;
@@ -121,11 +132,52 @@ responsesRouter.post('/', async (req, res, next) => {
     return;
   }
 
+  // Non-streaming: commit 200 before driving the turn — beginResponse has succeeded, and
+  // from here on agent failures are encoded as status:"failed" in the body by contract.
+  // Once headers are flushed, res.json() would throw and the app-level error handler can
+  // only defer, so the body is written manually and errors are settled right here.
+  res.status(200);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) res.write(' ');
+  }, NONSTREAM_HEARTBEAT_MS);
+  heartbeat.unref();
+  res.on('close', () => clearInterval(heartbeat));
   try {
     const response = await driveResponse(begun, request.input);
-    res.status(200).json(response);
+    if (!res.writableEnded && !res.destroyed) res.end(JSON.stringify(response));
   } catch (error) {
-    next(error);
+    // driveResponse never rejects by contract (agent failures resolve as failed
+    // responses); this is the same last resort the stream branch has. Settle the stored
+    // row too, so a later GET /v1/responses/:id agrees with the body written below.
+    console.error('driveResponse crashed:', error);
+    try {
+      setResponseStatus(begun.responseId, 'failed');
+    } catch {
+      // the row may be unreachable for the same reason driveResponse crashed
+    }
+    if (!res.writableEnded && !res.destroyed) {
+      res.end(
+        JSON.stringify({
+          id: begun.responseId,
+          session_id: begun.sessionId,
+          status: 'failed',
+          agent: request.agent,
+          model: begun.model,
+          provider: begun.provider,
+          output_text: '',
+          usage: null,
+          error: { code: 'internal_error', message: 'Something went wrong.' },
+          metadata: null,
+          created: Date.now(),
+        }),
+      );
+    }
+  } finally {
+    clearInterval(heartbeat);
   }
 });
 
