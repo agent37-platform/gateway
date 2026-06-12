@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import { Router } from 'express';
 import {
   DEFAULT_AGENT,
@@ -6,9 +7,10 @@ import {
   SUPPORTED_AGENTS,
 } from '../../shared/types.js';
 import { isRecord, responseNotFound, validationError } from '../errors.js';
+import { resolveHomeAwarePath } from '../paths.js';
 import { initSSE, writeStreamEvent } from '../sse.js';
 import { attach, hasRun } from '../live-runs.js';
-import { getResponse } from '../db/queries.js';
+import { getResponse, setResponseStatus } from '../db/queries.js';
 import {
   beginResponse,
   cancelResponse,
@@ -18,6 +20,17 @@ import {
 } from '../responses.js';
 
 export const responsesRouter = Router();
+
+// A non-streaming turn sends its response headers only when the turn finishes, and every
+// hop to the client caps how long it will wait for headers (~100s at Cloudflare's edge,
+// not configurable) — which used to kill stream:false turns longer than that. So the
+// route commits its headers immediately and ticks a whitespace heartbeat while the turn
+// runs: leading whitespace before a JSON document is valid JSON (RFC 8259), so clients
+// parse the body unchanged. Env override exists so tests can tighten the cadence; the
+// 50ms floor keeps a typo'd value from becoming a whitespace flood (Node clamps NaN/0
+// intervals to 1ms).
+const heartbeatEnv = parseInt(process.env.GATEWAY_NONSTREAM_HEARTBEAT_MS || '', 10);
+const NONSTREAM_HEARTBEAT_MS = Number.isFinite(heartbeatEnv) && heartbeatEnv >= 50 ? heartbeatEnv : 25_000;
 
 function optionalString(value: unknown, field: string): string | null {
   if (value === undefined || value === null) return null;
@@ -44,6 +57,33 @@ function optionalEnum<T extends string>(
   return value as T;
 }
 
+/** Validate `files` attachment paths: each must name an existing regular file
+ *  on this instance. Returns resolved absolute paths. */
+function parseFiles(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || !value.every((p) => typeof p === 'string' && p.trim())) {
+    throw validationError('files must be an array of file paths.', 'files');
+  }
+  return value.map((p: string) => {
+    const path = resolveHomeAwarePath(p);
+    let stats;
+    try {
+      stats = statSync(path);
+    } catch {
+      throw validationError(`files entry '${p}' does not exist on this instance.`, 'files', 'Upload it first via POST /v1/files.');
+    }
+    if (!stats.isFile()) throw validationError(`files entry '${p}' is not a file.`, 'files');
+    return path;
+  });
+}
+
+/** Append attachment paths to the message the same way minions does — the
+ *  agent reads them from disk (its cwd is the workspace). */
+function withAttachedFiles(input: string, files: string[]): string {
+  if (files.length === 0) return input;
+  return `${input}\n\n[Attached files:\n${files.map((p) => `- ${p}`).join('\n')}]`;
+}
+
 function parseResponseBody(body: unknown): { request: ResponseRequest; stream: boolean } {
   const b = isRecord(body) ? body : {};
 
@@ -51,6 +91,8 @@ function parseResponseBody(body: unknown): { request: ResponseRequest; stream: b
   if (typeof input !== 'string' || !input.trim()) {
     throw validationError('input is required and must be a non-empty string.', 'input');
   }
+
+  const files = parseFiles(b.files);
 
   let sessionId: string | undefined;
   if (b.session_id !== undefined && b.session_id !== null) {
@@ -88,7 +130,15 @@ function parseResponseBody(body: unknown): { request: ResponseRequest; stream: b
   // container is the Cloud layer's job; inside the container there is one gateway.
 
   return {
-    request: { sessionId, input, agent, model, provider, reasoningEffort, metadata },
+    request: {
+      sessionId,
+      input: withAttachedFiles(input, files),
+      agent,
+      model,
+      provider,
+      reasoningEffort,
+      metadata,
+    },
     stream: b.stream === true,
   };
 }
@@ -121,11 +171,52 @@ responsesRouter.post('/', async (req, res, next) => {
     return;
   }
 
+  // Non-streaming: commit 200 before driving the turn — beginResponse has succeeded, and
+  // from here on agent failures are encoded as status:"failed" in the body by contract.
+  // Once headers are flushed, res.json() would throw and the app-level error handler can
+  // only defer, so the body is written manually and errors are settled right here.
+  res.status(200);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) res.write(' ');
+  }, NONSTREAM_HEARTBEAT_MS);
+  heartbeat.unref();
+  res.on('close', () => clearInterval(heartbeat));
   try {
     const response = await driveResponse(begun, request.input);
-    res.status(200).json(response);
+    if (!res.writableEnded && !res.destroyed) res.end(JSON.stringify(response));
   } catch (error) {
-    next(error);
+    // driveResponse never rejects by contract (agent failures resolve as failed
+    // responses); this is the same last resort the stream branch has. Settle the stored
+    // row too, so a later GET /v1/responses/:id agrees with the body written below.
+    console.error('driveResponse crashed:', error);
+    try {
+      setResponseStatus(begun.responseId, 'failed');
+    } catch {
+      // the row may be unreachable for the same reason driveResponse crashed
+    }
+    if (!res.writableEnded && !res.destroyed) {
+      res.end(
+        JSON.stringify({
+          id: begun.responseId,
+          session_id: begun.sessionId,
+          status: 'failed',
+          agent: request.agent,
+          model: begun.model,
+          provider: begun.provider,
+          output_text: '',
+          usage: null,
+          error: { code: 'internal_error', message: 'Something went wrong.' },
+          metadata: null,
+          created: Date.now(),
+        }),
+      );
+    }
+  } finally {
+    clearInterval(heartbeat);
   }
 });
 

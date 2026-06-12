@@ -1,0 +1,27 @@
+meta {
+  name: 14 Download File
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{baseUrl}}/v1/files/content?path={{uploadedFilePath}}
+  body: none
+  auth: none
+}
+
+params:query {
+  path: {{uploadedFilePath}}
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+}
+
+docs {
+  Streams the file at `path` back. Works for any file on the instance — an
+  upload (run 13 Upload File first to set `uploadedFilePath`) or a file the
+  agent produced in its workspace.
+}

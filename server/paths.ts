@@ -8,7 +8,7 @@ export function expandHomePrefix(value: string): string {
   return value;
 }
 
-function resolveHomeAwarePath(value: string): string {
+export function resolveHomeAwarePath(value: string): string {
   return resolve(expandHomePrefix(value));
 }
 
@@ -36,6 +36,11 @@ export function resolveGatewayLogsDir(): string {
 export function resolveWorkspaceDir(): string {
   const configured = process.env.GATEWAY_WORKSPACE_DIR?.trim();
   return resolveHomeAwarePath(configured || join(resolveGatewayHome(), 'workspace'));
+}
+
+/** Where POST /v1/files lands uploads, inside the agent's workspace. */
+export function resolveUploadsDir(): string {
+  return join(resolveWorkspaceDir(), 'uploads');
 }
 
 export function resolveGatewayDbPath(): string {

@@ -1,6 +1,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
+import { existsSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { startTestServer, postJson, SseReader, type TestServer } from './test-helpers.js';
 
 let server: TestServer | undefined;
@@ -151,6 +153,74 @@ test('an in-flight response blocks another turn and can be cancelled', async () 
   assert.equal(cancel.status, 200);
   await reader.drain();
   assert.equal((await waitForTerminalResponse(responseId)).status, 'cancelled');
+});
+
+test('a file can be uploaded, attached to a turn, and downloaded back', async () => {
+  const marker = `attachment-marker-${Date.now()}`;
+  const form = new FormData();
+  form.set('file', new File([`The secret marker is: ${marker}\n`], 'attachment tëst.txt'));
+  const uploaded = await jsonOk<{ path: string; filename: string; bytes: number }>(
+    await fetch(`${base}/v1/files`, { method: 'POST', body: form }),
+  );
+  assert.equal(uploaded.filename, 'attachment tëst.txt'); // UTF-8 name survives multipart
+  assert.match(uploaded.path, /\/workspace\/uploads\/[a-f0-9]{8}-attachment tëst\.txt$/);
+  assert.ok(uploaded.bytes > 0);
+  assert.ok(existsSync(uploaded.path));
+
+  const turn = await jsonOk<ResponseBody>(
+    await postJson(base, {
+      input: 'Read the attached file and reply with the exact secret marker it contains.',
+      files: [uploaded.path],
+      reasoning_effort: 'low',
+    }),
+  );
+  assertCompleted(turn);
+  assert.ok(turn.output_text.includes(marker), `output should contain ${marker}: ${turn.output_text}`);
+
+  // The attachment block lands in the session history the same way minions writes it.
+  const session = await jsonOk<{ history: Array<{ role: string; content: string }> }>(
+    await fetch(`${base}/v1/sessions/${turn.session_id}`),
+  );
+  assert.ok(
+    session.history.some(
+      (message) => message.role === 'user' && message.content.includes(`[Attached files:\n- ${uploaded.path}]`),
+    ),
+  );
+
+  const download = await fetch(`${base}/v1/files/content?path=${encodeURIComponent(uploaded.path)}`);
+  assert.equal(download.status, 200);
+  assert.equal(await download.text(), `The secret marker is: ${marker}\n`);
+
+  // Agents produce dotfiles too; express must not hide them.
+  const dotfilePath = join(dirname(uploaded.path), '.dotfile-download-test');
+  writeFileSync(dotfilePath, 'dot');
+  const dotfile = await fetch(`${base}/v1/files/content?path=${encodeURIComponent(dotfilePath)}`);
+  assert.equal(dotfile.status, 200);
+  assert.equal(await dotfile.text(), 'dot');
+});
+
+test('file validation and not-found errors stay stable', async () => {
+  const noFile = await fetch(`${base}/v1/files`, { method: 'POST', body: new FormData() });
+  assert.equal(noFile.status, 400);
+  assert.equal((await noFile.json()).error.param, 'file');
+
+  const badFiles = await postJson(base, { input: 'x', files: 'not-an-array' });
+  assert.equal(badFiles.status, 400);
+  assert.equal((await badFiles.json()).error.param, 'files');
+
+  const missingAttachment = await postJson(base, { input: 'x', files: ['/nope/missing.txt'] });
+  assert.equal(missingAttachment.status, 400);
+  const missingBody = await missingAttachment.json();
+  assert.equal(missingBody.error.param, 'files');
+  assert.ok(missingBody.error.message.includes('/nope/missing.txt'));
+
+  const noPath = await fetch(`${base}/v1/files/content`);
+  assert.equal(noPath.status, 400);
+  assert.equal((await noPath.json()).error.param, 'path');
+
+  const missingDownload = await fetch(`${base}/v1/files/content?path=${encodeURIComponent('/nope/missing.txt')}`);
+  assert.equal(missingDownload.status, 404);
+  assert.equal((await missingDownload.json()).error.code, 'file_not_found');
 });
 
 test('validation and not-found errors stay stable', async () => {

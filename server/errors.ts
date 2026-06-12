@@ -45,6 +45,10 @@ export function responseNotFound(id: string): GatewayError {
   return new GatewayError(404, 'response_not_found', `No response with id '${id}'.`);
 }
 
+export function fileNotFound(path: string): GatewayError {
+  return new GatewayError(404, 'file_not_found', `No file at '${path}'.`);
+}
+
 export function sessionBusy(): GatewayError {
   return new GatewayError(409, 'session_busy', 'A response is already running on this session.', {
     hint: 'Cancel the running response, or start another session.',
