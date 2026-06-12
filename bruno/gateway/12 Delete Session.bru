@@ -10,11 +10,16 @@ delete {
   auth: none
 }
 
+vars:pre-request {
+  sessionId: 58dbb5640e674f8cb1ff50311d769cd6
+  baseUrl: http://localhost:3737
+}
+
 tests {
   test("returns 200", function () {
     expect(res.status).to.equal(200);
   });
-
+  
   test("deleted", function () {
     expect(res.body.deleted).to.equal(true);
   });

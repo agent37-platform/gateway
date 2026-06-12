@@ -21,6 +21,10 @@ body:json {
   }
 }
 
+vars:pre-request {
+  baseUrl: http://localhost:3737
+}
+
 script:post-response {
   if (res.status === 200 && res.body) {
     if (res.body.session_id) bru.setEnvVar("sessionId", res.body.session_id, { persist: true });
@@ -32,7 +36,7 @@ tests {
   test("returns 200", function () {
     expect(res.status).to.equal(200);
   });
-
+  
   test("completed with text", function () {
     expect(res.body.id).to.be.a("string");
     expect(res.body.session_id).to.be.a("string");
@@ -45,7 +49,7 @@ docs {
   Start a new conversation: send `input` with no `session_id`. The reply returns
   a `session_id` (saved to the env) you reuse to continue the thread, and a
   response id (also saved) for Get Response / Cancel.
-
+  
   Other optional fields: `model`, `provider`, `reasoning_effort`
   (none|minimal|low|medium|high|xhigh), `metadata` (<=16 keys), `stream`.
 }
