@@ -2,30 +2,23 @@ import type {
   AgentDefaults,
   AgentModelsResponse,
   HermesMessage,
-  ModelsListResponse,
   SessionMetadata,
-  SessionWithHistory,
-  TurnUsage,
 } from '../../shared/types.js';
 import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
 
+// OpenClaw's gateway serves an OpenResponses-compatible `POST /v1/responses`
+// (must be enabled via `gateway.http.endpoints.responses.enabled` in
+// openclaw.json) plus `GET /v1/models` and `/health`. There is no HTTP API for
+// session history, deletion, or cancelling a turn.
 const DEFAULT_BASE_URL = 'http://localhost:3738';
 
 function baseUrl(): string {
   return process.env.OPENCLAW_BASE_URL?.trim().replace(/\/$/, '') || DEFAULT_BASE_URL;
 }
 
-async function ocFetch(path: string, init?: RequestInit): Promise<Response> {
-  const url = `${baseUrl()}${path}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`OpenClaw ${init?.method ?? 'GET'} ${path} → ${res.status}: ${body}`);
-  }
-  return res;
+function authHeaders(): Record<string, string> {
+  const token = process.env.OPENCLAW_TOKEN?.trim();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<{ event: string; data: string }> {
@@ -60,8 +53,26 @@ async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<{ eve
   }
 }
 
+interface OpenResponsesEnvelope {
+  response?: {
+    id?: string;
+    usage?: { input_tokens?: number; output_tokens?: number };
+    error?: { code?: string; message?: string };
+  };
+  delta?: string;
+}
+
+// The gateway accepts none..xhigh; OpenClaw only low|medium|high.
+const EFFORT_MAP: Record<string, 'low' | 'medium' | 'high'> = {
+  minimal: 'low',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'high',
+};
+
 export class OpenClawAdapter implements AgentAdapter {
-  private activeResponses = new Map<string, string>();
+  private activeRuns = new Map<string, AbortController>();
 
   async *chatStream(
     sessionId: string,
@@ -69,107 +80,94 @@ export class OpenClawAdapter implements AgentAdapter {
     options?: AgentRunOptions,
   ): AsyncIterable<StreamEvent> {
     const { settings } = options ?? {};
+    const effort = settings?.reasoningEffort ? EFFORT_MAP[settings.reasoningEffort] : undefined;
 
-    const res = await fetch(`${baseUrl()}/v1/responses`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({
-        input: message,
-        session_id: sessionId,
-        stream: true,
-        agent: 'openclaw',
-        model: settings?.model ?? undefined,
-        provider: settings?.provider ?? undefined,
-        reasoning_effort: settings?.reasoningEffort ?? undefined,
-      }),
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`OpenClaw POST /v1/responses → ${res.status}: ${body}`);
-    }
-
-    if (!res.body) throw new Error('OpenClaw response has no body');
+    const controller = new AbortController();
+    this.activeRuns.set(sessionId, controller);
 
     try {
+      // The request schema is strict: unknown fields are rejected, `model` is
+      // required, and `user` is what keys the conversation to a session.
+      const res = await fetch(`${baseUrl()}/v1/responses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...authHeaders() },
+        signal: controller.signal,
+        body: JSON.stringify({
+          // OpenClaw rejects requests without `model`. When the turn doesn't
+          // set one, bare "openclaw" routes to its default agent; the
+          // session's model stays null gateway-side.
+          model: settings?.model || 'openclaw',
+          input: message,
+          user: sessionId,
+          stream: true,
+          reasoning: effort ? { effort } : undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`OpenClaw POST /v1/responses → ${res.status}: ${body}`);
+      }
+
+      if (!res.body) throw new Error('OpenClaw response has no body');
+
       for await (const { event, data } of parseSSE(res.body)) {
-        let payload: Record<string, unknown>;
+        let payload: OpenResponsesEnvelope;
         try {
-          payload = JSON.parse(data) as Record<string, unknown>;
+          payload = JSON.parse(data) as OpenResponsesEnvelope;
         } catch {
           continue;
         }
 
         switch (event) {
-          case 'response.created':
-            if (typeof payload.id === 'string') {
-              this.activeResponses.set(sessionId, payload.id);
-            }
-            break;
           case 'response.output_text.delta':
-            yield { type: 'text_delta', content: (payload.text as string) ?? '' };
+            yield { type: 'text_delta', content: payload.delta ?? '' };
             break;
-          case 'response.reasoning.delta':
-            yield { type: 'thinking_delta', content: (payload.text as string) ?? '' };
-            break;
-          case 'response.tool_call.started':
-            yield {
-              type: 'tool_progress',
-              tool: (payload.tool as string) ?? 'tool',
-              status: 'running',
-              label: payload.label as string | undefined,
-            };
-            break;
-          case 'response.tool_call.completed':
-            yield {
-              type: 'tool_progress',
-              tool: (payload.tool as string) ?? 'tool',
-              status: 'completed',
-              duration: payload.duration_ms as number | undefined,
-            };
-            break;
-          case 'response.tool_call.failed':
-            yield {
-              type: 'tool_progress',
-              tool: (payload.tool as string) ?? 'tool',
-              status: 'error',
-              label: payload.error as string | undefined,
-            };
-            break;
-          case 'response.completed':
+          case 'response.completed': {
+            const usage = payload.response?.usage;
             yield {
               type: 'done',
               sessionId,
-              usage: (payload.usage as TurnUsage) ?? null,
+              usage: usage
+                ? {
+                    input_tokens: usage.input_tokens ?? 0,
+                    output_tokens: usage.output_tokens ?? 0,
+                    cost_usd: null,
+                  }
+                : null,
               interrupted: false,
             };
             break;
+          }
           case 'response.failed': {
-            const err = payload.error as { code?: string; message?: string; hint?: string } | undefined;
+            const err = payload.response?.error;
             yield {
               type: 'error',
               error: err?.message ?? 'OpenClaw error',
               code: err?.code,
-              hint: err?.hint,
             };
             break;
           }
         }
       }
+    } catch (error) {
+      // OpenClaw has no cancel API; an interrupt aborts our stream and the
+      // turn ends as cancelled. OpenClaw may keep working server-side.
+      if (controller.signal.aborted) {
+        yield { type: 'done', sessionId, usage: null, interrupted: true };
+        return;
+      }
+      throw error;
     } finally {
-      this.activeResponses.delete(sessionId);
+      this.activeRuns.delete(sessionId);
     }
   }
 
   async interruptChat(sessionId: string): Promise<boolean> {
-    const responseId = this.activeResponses.get(sessionId);
-    if (!responseId) return false;
-    try {
-      await ocFetch(`/v1/responses/${encodeURIComponent(responseId)}/cancel`, { method: 'POST' });
-      return true;
-    } catch {
-      return false;
-    }
+    const controller = this.activeRuns.get(sessionId);
+    if (!controller) return false;
+    controller.abort();
+    return true;
   }
 
   async healthCheck(): Promise<boolean> {
@@ -181,68 +179,35 @@ export class OpenClawAdapter implements AgentAdapter {
     }
   }
 
-  async getMessages(sessionId: string): Promise<HermesMessage[]> {
-    const res = await ocFetch(`/v1/sessions/${encodeURIComponent(sessionId)}`);
-    const data = await res.json() as SessionWithHistory;
-    return data.history.map((m) => ({
-      id: m.id,
-      task_id: sessionId,
-      role: m.role,
-      content: m.content,
-      thinking: m.thinking,
-      created_at: m.created_at,
-    }));
+  async getMessages(): Promise<HermesMessage[]> {
+    return [];
   }
 
-  async getSessionMetadata(sessionId: string): Promise<SessionMetadata | null> {
-    try {
-      const res = await ocFetch(`/v1/sessions/${encodeURIComponent(sessionId)}`);
-      const data = await res.json() as SessionWithHistory;
-      return {
-        id: data.id,
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        reasoning_tokens: 0,
-        estimated_cost_usd: null,
-        cost_status: null,
-        model: data.model,
-      };
-    } catch {
-      return null;
-    }
+  async getSessionMetadata(): Promise<SessionMetadata | null> {
+    return null;
   }
 
-  async deleteSession(sessionId: string): Promise<boolean> {
-    try {
-      const res = await ocFetch(`/v1/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
-      const data = await res.json() as { deleted: boolean };
-      return data.deleted;
-    } catch {
-      return false;
-    }
+  async deleteSession(): Promise<boolean> {
+    return false;
   }
 
   async getModels(): Promise<AgentModelsResponse> {
-    const res = await ocFetch('/v1/models');
-    const data = await res.json() as ModelsListResponse;
-    const groupMap = new Map<string, AgentModelsResponse['groups'][0]>();
-    for (const model of data.data) {
-      const provider = model.provider ?? 'unknown';
-      if (!groupMap.has(provider)) groupMap.set(provider, { provider, models: [] });
-      groupMap.get(provider)!.models.push({
-        id: model.id,
-        label: model.label,
-        source: 'catalog',
-        provider: model.provider,
-        isCurrentDefault: model.is_default,
-      });
-    }
+    const res = await fetch(`${baseUrl()}/v1/models`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(`OpenClaw GET /v1/models → ${res.status}`);
+    const data = await res.json() as { data: { id: string }[] };
     return {
-      defaultModel: data.default_model,
-      activeProvider: data.default_provider,
-      groups: [...groupMap.values()],
+      defaultModel: null,
+      activeProvider: 'openclaw',
+      groups: [{
+        provider: 'openclaw',
+        models: data.data.map((m) => ({
+          id: m.id,
+          label: m.id,
+          source: 'catalog',
+          provider: 'openclaw',
+          isCurrentDefault: false,
+        })),
+      }],
     };
   }
 
