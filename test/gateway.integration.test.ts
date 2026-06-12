@@ -1,9 +1,21 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
-import { existsSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { parse } from 'dotenv';
 import { startTestServer, postJson, SseReader, type TestServer } from './test-helpers.js';
+
+// Pull only the OpenClaw settings from .env. Loading the whole file would
+// reshape the Hermes worker's environment too (e.g. HERMES_HOME).
+try {
+  const env = parse(readFileSync(new URL('../.env', import.meta.url)));
+  for (const key of ['OPENCLAW_BASE_URL', 'OPENCLAW_TOKEN'] as const) {
+    if (env[key] && !process.env[key]) process.env[key] = env[key];
+  }
+} catch {
+  // no .env — rely on the ambient environment
+}
 
 let server: TestServer | undefined;
 let base: string;
@@ -22,6 +34,7 @@ interface ResponseBody {
   session_id: string;
   status: string;
   agent: string;
+  model: string | null;
   output_text: string;
   usage: unknown;
   metadata: Record<string, unknown> | null;
@@ -221,6 +234,68 @@ test('file validation and not-found errors stay stable', async () => {
   const missingDownload = await fetch(`${base}/v1/files/content?path=${encodeURIComponent('/nope/missing.txt')}`);
   assert.equal(missingDownload.status, 404);
   assert.equal((await missingDownload.json()).error.code, 'file_not_found');
+});
+
+// --- OpenClaw adapter (needs a local OpenClaw gateway; skipped when it's down) ---
+
+const openclawBase = process.env.OPENCLAW_BASE_URL?.trim().replace(/\/$/, '') || 'http://localhost:3738';
+const openclawSkip = (await fetch(`${openclawBase}/health`).then((res) => res.ok).catch(() => false))
+  ? false
+  : 'no OpenClaw gateway running locally';
+
+test('openclaw responses complete, stream, and stay on one session', { skip: openclawSkip }, async () => {
+  const marker = `openclaw-marker-${Date.now()}`;
+  const created = await jsonOk<ResponseBody>(
+    await postJson(base, {
+      agent: 'openclaw',
+      input: `Remember this marker: ${marker}. Reply with just OK.`,
+    }),
+  );
+  assert.equal(created.status, 'completed');
+  assert.equal(created.agent, 'openclaw');
+  assert.equal(created.model, null);
+  assert.ok(created.output_text.trim().length > 0);
+  assert.ok(created.usage);
+
+  const recalled = await jsonOk<ResponseBody>(
+    await postJson(base, {
+      agent: 'openclaw',
+      session_id: created.session_id,
+      input: 'Reply with just the marker I asked you to remember.',
+    }),
+  );
+  assert.equal(recalled.status, 'completed');
+  assert.equal(recalled.session_id, created.session_id);
+  assert.ok(recalled.output_text.includes(marker));
+
+  const stream = await postJson(base, {
+    agent: 'openclaw',
+    input: 'Reply with one short sentence.',
+    stream: true,
+  });
+  assert.equal(stream.status, 200);
+  const events = await new SseReader(stream).drain();
+  assert.equal(events[0]?.event, 'response.created');
+  assert.ok(events.some((event) => event.event === 'response.output_text.delta'));
+  assert.equal(events.at(-1)?.event, 'response.completed');
+});
+
+test('an in-flight openclaw turn can be cancelled', { skip: openclawSkip }, async () => {
+  const slow = await postJson(base, {
+    agent: 'openclaw',
+    input: 'Write a 1000 word essay about oceans.',
+    stream: true,
+  });
+  assert.equal(slow.status, 200);
+
+  const reader = new SseReader(slow);
+  const opening = await reader.until((event) => event.event === 'response.created');
+  const responseId = opening.at(-1)?.data.id as string;
+
+  const cancel = await fetch(`${base}/v1/responses/${responseId}/cancel`, { method: 'POST' });
+  assert.equal(cancel.status, 200);
+  await reader.drain();
+  assert.equal((await waitForTerminalResponse(responseId)).status, 'cancelled');
 });
 
 test('validation and not-found errors stay stable', async () => {

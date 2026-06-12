@@ -16,14 +16,10 @@ headers {
 
 body:json {
   {
-    "input": "Reply with exactly the words: hello from openclaw",
+    "input": "What is the time now in IST?",
     "agent": "openclaw",
     "reasoning_effort": "low"
   }
-}
-
-vars:pre-request {
-  baseUrl: http://localhost:3737
 }
 
 script:post-response {

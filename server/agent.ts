@@ -1,19 +1,19 @@
 import { HermesWorkerAdapter } from './adapters/hermes-worker.js';
 import { OpenClawAdapter } from './adapters/openclaw-adapter.js';
 import type { AgentAdapter } from './adapters/types.js';
-import type { AgentName } from '../shared/types.js';
+import type { AgentType } from '../shared/types.js';
 
 export interface GatewayAdapter extends AgentAdapter {
   start?(): Promise<void>;
   stop?(): Promise<void>;
 }
 
-const registry: Record<AgentName, GatewayAdapter> = {
+const registry: Record<AgentType, GatewayAdapter> = {
   hermes: new HermesWorkerAdapter(),
   openclaw: new OpenClawAdapter(),
 };
 
-export function getAdapter(agent: AgentName): GatewayAdapter {
+export function getAdapter(agent: AgentType): GatewayAdapter {
   return registry[agent];
 }
 

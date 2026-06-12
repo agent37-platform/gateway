@@ -8,7 +8,7 @@
 
 import type { AgentRunSettings, StreamEvent } from './adapters/types.js';
 import type {
-  AgentName,
+  AgentType,
   ApiError,
   ReasoningEffort,
   ResponseObject,
@@ -45,7 +45,7 @@ import { newResponseId, newSessionId } from './ids.js';
 export interface ResponseRequest {
   sessionId?: string;
   input: string;
-  agent: AgentName;
+  agent: AgentType;
   model: string | null;
   provider: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -55,7 +55,7 @@ export interface ResponseRequest {
 export interface BegunResponse {
   responseId: string;
   sessionId: string;
-  agent: AgentName;
+  agent: AgentType;
   settings: AgentRunSettings;
   model: string | null;
   provider: string | null;

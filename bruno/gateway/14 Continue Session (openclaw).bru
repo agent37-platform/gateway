@@ -23,11 +23,6 @@ body:json {
   }
 }
 
-vars:pre-request {
-  openclawSessionId: b815e52402e94966bd244b6860637dc9
-  baseUrl: http://localhost:3737
-}
-
 tests {
   test("returns 200", function () {
     expect(res.status).to.equal(200);

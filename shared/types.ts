@@ -18,8 +18,8 @@ export const RESPONSE_MODES = ['chat', 'goal'] as const;
 export type ResponseMode = (typeof RESPONSE_MODES)[number];
 
 export const SUPPORTED_AGENTS = ['hermes', 'openclaw'] as const;
-export type AgentName = (typeof SUPPORTED_AGENTS)[number];
-export const DEFAULT_AGENT: AgentName = 'hermes';
+export type AgentType = (typeof SUPPORTED_AGENTS)[number];
+export const DEFAULT_AGENT: AgentType = 'hermes';
 
 /** Safety cap for goal mode. Keep in sync with GOAL_MAX_TURNS in hermes_worker.py. */
 export const GOAL_MAX_TURNS = 20;
@@ -64,7 +64,7 @@ export interface ResponseObject {
   id: string;
   session_id: string;
   status: ResponseStatus;
-  agent: AgentName;
+  agent: AgentType;
   model: string | null;
   provider: string | null;
   output_text: string;
@@ -81,7 +81,7 @@ export interface ResponseObject {
 /** One conversation. The gateway holds the index; Hermes owns the transcript. */
 export interface SessionObject {
   id: string;
-  agent: AgentName;
+  agent: AgentType;
   model: string | null;
   provider: string | null;
   created: number;

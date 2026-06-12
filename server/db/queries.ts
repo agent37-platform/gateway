@@ -1,6 +1,6 @@
 import db from './index.js';
 import type {
-  AgentName,
+  AgentType,
   ApiError,
   ResponseObject,
   ResponseStatus,
@@ -50,7 +50,7 @@ function stringifyJson(value: unknown): string | null {
 function rowToSession(row: SessionRow): SessionObject {
   return {
     id: row.id,
-    agent: row.agent as AgentName,
+    agent: row.agent as AgentType,
     model: row.model,
     provider: row.provider,
     created: row.created,
@@ -63,7 +63,7 @@ function rowToResponse(row: ResponseRow): ResponseObject {
     id: row.id,
     session_id: row.session_id,
     status: row.status as ResponseStatus,
-    agent: row.agent as AgentName,
+    agent: row.agent as AgentType,
     model: row.model,
     provider: row.provider,
     output_text: row.output_text,
@@ -88,7 +88,7 @@ const stmtDeleteSession = db.prepare('DELETE FROM sessions WHERE id = ?');
 
 export function insertSession(input: {
   id: string;
-  agent: AgentName;
+  agent: AgentType;
   model?: string | null;
   provider?: string | null;
 }): SessionObject {
@@ -144,7 +144,7 @@ const stmtSetResponseStatus = db.prepare('UPDATE responses SET status = @status 
 export function insertResponse(input: {
   id: string;
   session_id: string;
-  agent: AgentName;
+  agent: AgentType;
   model?: string | null;
   provider?: string | null;
   metadata?: Record<string, unknown> | null;
