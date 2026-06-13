@@ -1,0 +1,55 @@
+meta {
+  name: 13 Create Response (openclaw)
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{baseUrl}}/v1/responses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": "What is the time now in IST?",
+    "agent": "openclaw",
+    "reasoning_effort": "low"
+  }
+}
+
+script:post-response {
+  if (res.status === 200 && res.body) {
+    if (res.body.session_id) bru.setEnvVar("openclawSessionId", res.body.session_id, { persist: true });
+    if (res.body.id) bru.setEnvVar("openclawResponseId", res.body.id, { persist: true });
+  }
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("completed with text", function () {
+    expect(res.body.id).to.be.a("string");
+    expect(res.body.session_id).to.be.a("string");
+    expect(res.body.status).to.equal("completed");
+    expect(res.body.agent).to.equal("openclaw");
+    expect(res.body.output_text).to.be.a("string");
+  });
+}
+
+docs {
+  Start a new OpenClaw session. Pass `"agent": "openclaw"` — the gateway routes
+  the turn to the OpenClaw backend running on port 18789.
+
+  The reply saves `openclawSessionId` and `openclawResponseId` to the environment
+  so the follow-up requests below can reuse them.
+
+  OpenClaw must be running locally:
+    openclaw start   (listens on http://localhost:18789)
+}

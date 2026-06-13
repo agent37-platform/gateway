@@ -8,8 +8,9 @@ instance's agent, streams the work back, and keeps the conversation going. The
 streaming contract and request shape are the same whatever agent is behind it —
 so client code doesn't change when the agent does.
 
-Today it routes to **Hermes**. The adapter seam is built so **OpenClaw** and
-**Claude Code** slot in next.
+Today it routes to **Hermes** (the default) and **OpenClaw** — pick per request
+with the `agent` field. The adapter seam is built so **Claude Code** slots in
+next.
 
 > This is the per-instance request plane. Creating, sizing, and billing
 > instances is the job of the Agent37 Cloud control plane, which routes a
@@ -47,6 +48,19 @@ State is split deliberately:
 - **Transcript history** is never duplicated; it's projected on demand from
   Hermes' `SessionDB`.
 
+## How it talks to OpenClaw
+
+The OpenClaw adapter is plain HTTP: it forwards turns to OpenClaw's own gateway
+(`POST /v1/responses`, OpenResponses-compatible) at `OPENCLAW_BASE_URL`
+(defaults to a local OpenClaw when unset), authenticated with `OPENCLAW_TOKEN`. The
+responses endpoint must be enabled in `openclaw.json`
+(`gateway.http.endpoints.responses.enabled`).
+
+OpenClaw has no HTTP API for session history, deletion, or cancelling a turn,
+so for `openclaw` sessions: `GET /v1/sessions/{id}` returns empty history,
+`DELETE` only removes the gateway's own records, and cancel aborts the
+gateway-side stream (OpenClaw may keep working server-side).
+
 ## Quickstart
 
 **Prerequisites:** Node.js 24+ and a working [Hermes](https://hermes-agent.nousresearch.com)
@@ -76,6 +90,7 @@ behind the host, which handles and forwards authentication.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `input` | string, required | The message or task. |
+| `agent` | string | `hermes` (default) or `openclaw`. Routing is per request, so include it on every turn of an `openclaw` session. |
 | `session_id` | string | Continue a conversation. Omit to start a new one. |
 | `files` | string[] | Absolute paths of files to attach (from `POST /v1/files`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
@@ -168,6 +183,8 @@ stays stable.
 | Liveness + worker reachability | `GET /v1/health` |
 | Version | `GET /v1/version` |
 
+`GET /v1/models` and `/v1/health` report on the default agent (Hermes).
+
 ### Errors
 
 Every error returns a stable, machine-readable body. Branch on `code`, show
@@ -203,7 +220,8 @@ npm test          # integration suite against the real local Hermes worker/LLM
 `npm test` drives the real Express app over HTTP/SSE against a throwaway gateway
 state dir. Response tests call the local Hermes worker and configured LLM; the
 suite also covers replay, `session_busy`, cancel, persistence, history, and
-error bodies.
+error bodies. The OpenClaw tests run against a local OpenClaw gateway and are
+skipped automatically when none is running.
 
 ### Poke it by hand (Bruno)
 
@@ -211,20 +229,22 @@ A [Bruno](https://www.usebruno.com/) collection lives in [`bruno/`](bruno/) —
 open that folder in Bruno, pick the **local** environment (`baseUrl`
 `http://localhost:3737`), and run the requests top to bottom. *Create Response*
 saves the `session_id` and response id into the environment, so *Continue
-Session*, *Get Response*, *Cancel*, and *Delete Session* just work. For
+Session*, *Get Response*, *Cancel*, and *Delete Session* just work. Requests
+13–14 do the same for OpenClaw (start `openclaw` locally first). For
 *Upload File*, pick any local file first; it saves the uploaded path for
 *Download File*.
 
 ## Configuration
 
 All optional — see [`.env.example`](.env.example). Highlights: `PORT` (3737),
-`HOST` (0.0.0.0), `AGENT37_GATEWAY_HOME` (`~/.agent37-gateway`), and the
-`HERMES_*` variables that locate the Hermes install.
+`HOST` (0.0.0.0), `AGENT37_GATEWAY_HOME` (`~/.agent37-gateway`), the `HERMES_*`
+variables that locate the Hermes install, and `OPENCLAW_BASE_URL` /
+`OPENCLAW_TOKEN` for the OpenClaw route.
 
 ## Roadmap
 
 - **`goal` mode** — autonomous, multi-turn runs (the worker primitives are in place).
-- **More adapters** — OpenClaw and Claude Code, behind the same `AgentAdapter` seam.
+- **More adapters** — Claude Code, behind the same `AgentAdapter` seam.
 
 ## License
 

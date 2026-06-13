@@ -21,16 +21,12 @@ import {
 
 export const responsesRouter = Router();
 
-// A non-streaming turn sends its response headers only when the turn finishes, and every
-// hop to the client caps how long it will wait for headers (~100s at Cloudflare's edge,
-// not configurable) — which used to kill stream:false turns longer than that. So the
-// route commits its headers immediately and ticks a whitespace heartbeat while the turn
-// runs: leading whitespace before a JSON document is valid JSON (RFC 8259), so clients
-// parse the body unchanged. Env override exists so tests can tighten the cadence; the
-// 50ms floor keeps a typo'd value from becoming a whitespace flood (Node clamps NaN/0
-// intervals to 1ms).
-const heartbeatEnv = parseInt(process.env.GATEWAY_NONSTREAM_HEARTBEAT_MS || '', 10);
-const NONSTREAM_HEARTBEAT_MS = Number.isFinite(heartbeatEnv) && heartbeatEnv >= 50 ? heartbeatEnv : 25_000;
+// A non-streaming turn only sends its response headers when the turn finishes, but every
+// hop to the client caps how long it waits for headers (~100s at Cloudflare's edge) — which
+// used to kill stream:false turns longer than that. So the route commits headers immediately
+// and ticks a whitespace heartbeat while the turn runs: leading whitespace before a JSON
+// document is still valid JSON (RFC 8259), so clients parse the body unchanged.
+const NONSTREAM_HEARTBEAT_MS = Number(process.env.GATEWAY_NONSTREAM_HEARTBEAT_MS) || 25_000;
 
 function optionalString(value: unknown, field: string): string | null {
   if (value === undefined || value === null) return null;
@@ -204,7 +200,7 @@ responsesRouter.post('/', async (req, res, next) => {
           id: begun.responseId,
           session_id: begun.sessionId,
           status: 'failed',
-          agent: request.agent,
+          agent: begun.agent,
           model: begun.model,
           provider: begun.provider,
           output_text: '',
