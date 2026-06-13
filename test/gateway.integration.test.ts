@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { dirname, join } from 'node:path';
 import { parse } from 'dotenv';
 import { startTestServer, postJson, SseReader, type TestServer } from './test-helpers.js';
+import { DEFAULT_BASE_URL } from '../server/adapters/openclaw-adapter.js';
 
 // Pull only the OpenClaw settings from .env. Loading the whole file would
 // reshape the Hermes worker's environment too (e.g. HERMES_HOME).
@@ -238,7 +239,7 @@ test('file validation and not-found errors stay stable', async () => {
 
 // --- OpenClaw adapter (needs a local OpenClaw gateway; skipped when it's down) ---
 
-const openclawBase = process.env.OPENCLAW_BASE_URL?.trim().replace(/\/$/, '') || 'http://localhost:3738';
+const openclawBase = process.env.OPENCLAW_BASE_URL?.trim().replace(/\/$/, '') || DEFAULT_BASE_URL;
 const openclawSkip = (await fetch(`${openclawBase}/health`).then((res) => res.ok).catch(() => false))
   ? false
   : 'no OpenClaw gateway running locally';

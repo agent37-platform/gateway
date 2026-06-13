@@ -52,7 +52,7 @@ State is split deliberately:
 
 The OpenClaw adapter is plain HTTP: it forwards turns to OpenClaw's own gateway
 (`POST /v1/responses`, OpenResponses-compatible) at `OPENCLAW_BASE_URL`
-(default `http://localhost:3738`), authenticated with `OPENCLAW_TOKEN`. The
+(defaults to a local OpenClaw when unset), authenticated with `OPENCLAW_TOKEN`. The
 responses endpoint must be enabled in `openclaw.json`
 (`gateway.http.endpoints.responses.enabled`).
 

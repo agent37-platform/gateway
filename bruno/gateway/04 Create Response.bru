@@ -32,7 +32,7 @@ tests {
   test("returns 200", function () {
     expect(res.status).to.equal(200);
   });
-  
+
   test("completed with text", function () {
     expect(res.body.id).to.be.a("string");
     expect(res.body.session_id).to.be.a("string");
@@ -45,7 +45,7 @@ docs {
   Start a new conversation: send `input` with no `session_id`. The reply returns
   a `session_id` (saved to the env) you reuse to continue the thread, and a
   response id (also saved) for Get Response / Cancel.
-  
+
   Other optional fields: `model`, `provider`, `reasoning_effort`
   (none|minimal|low|medium|high|xhigh), `metadata` (<=16 keys), `stream`,
   `files` (absolute paths to attach — see 13 Upload File).

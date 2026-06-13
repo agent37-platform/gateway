@@ -71,6 +71,10 @@ export function beginResponse(req: ResponseRequest): BegunResponse {
   if (req.sessionId && !session) throw sessionNotFound(req.sessionId);
 
   const sessionId = session?.id ?? newSessionId();
+  // On a continuation the backend is fixed by the session, not the request: routing on
+  // req.agent would let an omitted or mismatched agent silently hit the wrong worker. Cancel
+  // and the sessions route already key off the stored agent — this makes the turn path agree.
+  const agent = session ? session.agent : req.agent;
 
   if (activeResponseForSession(sessionId)) throw sessionBusy();
 
@@ -89,7 +93,7 @@ export function beginResponse(req: ResponseRequest): BegunResponse {
   insertResponse({
     id: responseId,
     session_id: sessionId,
-    agent: req.agent,
+    agent,
     model: req.model,
     provider: req.provider,
     metadata: req.metadata,
@@ -104,7 +108,7 @@ export function beginResponse(req: ResponseRequest): BegunResponse {
     reasoningEffort: req.reasoningEffort ?? undefined,
   };
 
-  return { responseId, sessionId, agent: req.agent, settings, model: req.model, provider: req.provider };
+  return { responseId, sessionId, agent, settings, model: req.model, provider: req.provider };
 }
 
 function emitToolProgress(responseId: string, event: StreamEvent): void {

@@ -10,7 +10,7 @@ import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
 // (must be enabled via `gateway.http.endpoints.responses.enabled` in
 // openclaw.json) plus `GET /v1/models` and `/health`. There is no HTTP API for
 // session history, deletion, or cancelling a turn.
-const DEFAULT_BASE_URL = 'http://localhost:3738';
+export const DEFAULT_BASE_URL = 'http://localhost:18789';
 
 function baseUrl(): string {
   return process.env.OPENCLAW_BASE_URL?.trim().replace(/\/$/, '') || DEFAULT_BASE_URL;
@@ -55,14 +55,14 @@ async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<{ eve
 
 interface OpenResponsesEnvelope {
   response?: {
-    id?: string;
     usage?: { input_tokens?: number; output_tokens?: number };
     error?: { code?: string; message?: string };
   };
   delta?: string;
 }
 
-// The gateway accepts none..xhigh; OpenClaw only low|medium|high.
+// The gateway accepts none..xhigh; OpenClaw only low|medium|high. 'none' is intentionally
+// left unmapped (undefined) so no reasoning param is sent.
 const EFFORT_MAP: Record<string, 'low' | 'medium' | 'high'> = {
   minimal: 'low',
   low: 'low',

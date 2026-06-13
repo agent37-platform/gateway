@@ -14,7 +14,7 @@ tests {
   test("returns 200", function () {
     expect(res.status).to.equal(200);
   });
-  
+
   test("has a model list", function () {
     expect(res.body.data).to.be.an("array");
   });

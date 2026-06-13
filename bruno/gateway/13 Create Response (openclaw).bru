@@ -33,7 +33,7 @@ tests {
   test("returns 200", function () {
     expect(res.status).to.equal(200);
   });
-  
+
   test("completed with text", function () {
     expect(res.body.id).to.be.a("string");
     expect(res.body.session_id).to.be.a("string");
@@ -45,11 +45,11 @@ tests {
 
 docs {
   Start a new OpenClaw session. Pass `"agent": "openclaw"` — the gateway routes
-  the turn to the OpenClaw backend running on port 3738.
-  
+  the turn to the OpenClaw backend running on port 18789.
+
   The reply saves `openclawSessionId` and `openclawResponseId` to the environment
   so the follow-up requests below can reuse them.
-  
+
   OpenClaw must be running locally:
-    openclaw start   (listens on http://localhost:3738)
+    openclaw start   (listens on http://localhost:18789)
 }

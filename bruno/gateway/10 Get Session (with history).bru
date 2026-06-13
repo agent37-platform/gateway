@@ -14,7 +14,7 @@ tests {
   test("returns 200", function () {
     expect(res.status).to.equal(200);
   });
-  
+
   test("includes transcript history", function () {
     expect(res.body.id).to.equal(bru.getEnvVar("sessionId"));
     expect(res.body.history).to.be.an("array");
