@@ -26,7 +26,7 @@
     "prod": "npm run build && npm run start",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
-    "selftest:worker": "python3 server/workers/hermes_worker.py --self-test",
+    "selftest:worker": "node bin/hermes-worker-selftest.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

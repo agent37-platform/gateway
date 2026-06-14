@@ -58,21 +58,42 @@ gateway-side stream (OpenClaw may keep working server-side).
 
 ## Quickstart
 
-**Prerequisites:** Node.js 24+ and a working [Hermes](https://hermes-agent.nousresearch.com)
-install (the worker auto-detects `~/.hermes/hermes-agent`; override with
-`HERMES_AGENT_DIR` / `HERMES_PYTHON`).
+**Prerequisites:**
+
+- Node.js 24+
+- A working [Hermes](https://hermes-agent.nousresearch.com) install with a
+  configured model/provider
+
+The server itself is Node, but useful agent calls need Hermes. The worker
+auto-detects `~/.hermes/hermes-agent` or the `hermes` CLI install; override with
+`HERMES_AGENT_DIR` / `HERMES_PYTHON` when Hermes lives somewhere else.
 
 ```bash
 npm install
-npm run dev          # tsx watch on http://localhost:3737
-# or
-npm run prod         # build + run the compiled server
+npm run selftest:worker
+npm run dev              # tsx watch on http://localhost:3737
 ```
 
-Check the worker can reach Hermes without booting the server:
+Expected self-test output includes `"ok": true`. If it reports `import_error`,
+set `HERMES_PYTHON` to the Python inside the Hermes virtualenv, for example:
 
 ```bash
-npm run selftest:worker
+HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python npm run selftest:worker
+```
+
+Then sanity-check the HTTP server:
+
+```bash
+curl http://localhost:3737/v1/health
+curl http://localhost:3737/v1/responses \
+  -H 'content-type: application/json' \
+  -d '{"input":"hello"}'
+```
+
+For a production-style local run:
+
+```bash
+npm run prod             # build + run the compiled server
 ```
 
 ## API
