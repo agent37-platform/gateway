@@ -1,24 +1,19 @@
 # Agent37 Gateway
 
-**One API to talk to an agent on an instance.**
+**One API for Agent37 agents.**
 
-The Agent37 Gateway runs inside each agent instance and exposes a small,
-Responses-style HTTP API. You send it a turn; it routes that turn to the
-instance's agent, streams the work back, and keeps the conversation going. The
-streaming contract and request shape are the same whatever agent is behind it —
-so client code doesn't change when the agent does.
+The Agent37 Gateway exposes a small, Responses-style HTTP API for talking to an
+Agent37 agent. You send it a turn; it routes that turn to the agent, streams the
+work back, and keeps the conversation going. The streaming contract and request
+shape are the same whatever agent is behind it — so client code doesn't change
+when the agent does.
 
 Today it routes to **Hermes** (the default) and **OpenClaw** — pick per request
 with the `agent` field. The adapter seam is built so **Claude Code** slots in
 next.
 
-> This is the per-instance request plane. Creating, sizing, and billing
-> instances is the job of the Agent37 Cloud control plane, which routes a
-> request to the right container and forwards it here. Inside the container
-> there is exactly one gateway, and it has no concept of instances — it just
-> answers.
-
-MIT licensed.
+> Want the hosted API? Use [Agent37 Cloud](https://www.agent37.com/cloud). This
+> repo is the gateway service that powers an Agent37 agent.
 
 ## How it talks to Hermes
 
