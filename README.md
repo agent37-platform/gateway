@@ -56,10 +56,12 @@ The OpenClaw adapter is plain HTTP: it forwards turns to OpenClaw's own gateway
 responses endpoint must be enabled in `openclaw.json`
 (`gateway.http.endpoints.responses.enabled`).
 
-OpenClaw has no HTTP API for session history, deletion, or cancelling a turn,
-so for `openclaw` sessions: `GET /v1/sessions/{id}` returns empty history,
-`DELETE` only removes the gateway's own records, and cancel aborts the
-gateway-side stream (OpenClaw may keep working server-side).
+Session history and deletion read through to OpenClaw's `/v1/conversations/{user}`
+(keyed by the gateway session id we send as `user` on each turn): `GET
+/v1/sessions/{id}` projects the transcript and `DELETE` removes OpenClaw's
+transcript before dropping the gateway's own records. OpenClaw has no cancel
+API, so cancel aborts the gateway-side stream only (OpenClaw may keep working
+server-side).
 
 ## Quickstart
 

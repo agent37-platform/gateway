@@ -8,8 +8,9 @@ import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
 
 // OpenClaw's gateway serves an OpenResponses-compatible `POST /v1/responses`
 // (must be enabled via `gateway.http.endpoints.responses.enabled` in
-// openclaw.json) plus `GET /v1/models` and `/health`. There is no HTTP API for
-// session history, deletion, or cancelling a turn.
+// openclaw.json) plus `GET /v1/models` and `/health`. Session history and
+// deletion read through to `/v1/conversations/{user}` (keyed by the `user` we
+// send on each turn); there is still no API for cancelling a turn.
 export const DEFAULT_BASE_URL = 'http://localhost:18789';
 
 function baseUrl(): string {
@@ -59,6 +60,25 @@ interface OpenResponsesEnvelope {
     error?: { code?: string; message?: string };
   };
   delta?: string;
+}
+
+// `/v1/conversations/{user}` projections. Keyed by the `user` value we send on
+// each turn (the gateway session id), mirroring Hermes' session.* shapes.
+interface OpenClawMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  created_at: number;
+  reasoning?: string | null;
+}
+
+interface OpenClawConversationMeta {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  reasoning_tokens?: number;
+  estimated_cost_usd?: number | null;
+  model?: string | null;
 }
 
 // The gateway accepts none..xhigh; OpenClaw only low|medium|high. 'none' is intentionally
@@ -179,16 +199,51 @@ export class OpenClawAdapter implements AgentAdapter {
     }
   }
 
-  async getMessages(): Promise<HermesMessage[]> {
-    return [];
+  async getMessages(sessionId: string): Promise<HermesMessage[]> {
+    const res = await fetch(
+      `${baseUrl()}/v1/conversations/${encodeURIComponent(sessionId)}/messages`,
+      { headers: authHeaders() },
+    );
+    if (res.status === 404) return []; // unknown conversation, not an error
+    if (!res.ok) throw new Error(`OpenClaw GET /v1/conversations → ${res.status}`);
+    const { data } = await res.json() as { data: OpenClawMessage[] };
+    return data.map((m, i) => ({
+      id: `openclaw:${sessionId}:${i}`,
+      task_id: sessionId,
+      role: m.role,
+      content: m.content,
+      thinking: m.reasoning ?? undefined,
+      created_at: m.created_at,
+    }));
   }
 
-  async getSessionMetadata(): Promise<SessionMetadata | null> {
-    return null;
+  async getSessionMetadata(sessionId: string): Promise<SessionMetadata | null> {
+    const res = await fetch(
+      `${baseUrl()}/v1/conversations/${encodeURIComponent(sessionId)}`,
+      { headers: authHeaders() },
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`OpenClaw GET /v1/conversations → ${res.status}`);
+    const m = await res.json() as OpenClawConversationMeta;
+    return {
+      id: sessionId,
+      input_tokens: m.input_tokens ?? 0,
+      output_tokens: m.output_tokens ?? 0,
+      cache_read_tokens: m.cache_read_tokens ?? 0,
+      cache_write_tokens: m.cache_write_tokens ?? 0,
+      reasoning_tokens: m.reasoning_tokens ?? 0,
+      estimated_cost_usd: m.estimated_cost_usd ?? null,
+      cost_status: null,
+      model: m.model ?? null,
+    };
   }
 
-  async deleteSession(): Promise<boolean> {
-    return false;
+  async deleteSession(sessionId: string): Promise<boolean> {
+    const res = await fetch(
+      `${baseUrl()}/v1/conversations/${encodeURIComponent(sessionId)}`,
+      { method: 'DELETE', headers: authHeaders() },
+    );
+    return res.ok;
   }
 
   async getModels(): Promise<AgentModelsResponse> {
