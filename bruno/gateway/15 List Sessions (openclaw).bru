@@ -1,0 +1,32 @@
+meta {
+  name: 15 List Sessions (openclaw)
+  type: http
+  seq: 15
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions?agent=openclaw
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: openclaw
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("only openclaw sessions", function () {
+    expect(res.body.data).to.be.an("array");
+    res.body.data.forEach((s) => expect(s.agent).to.equal("openclaw"));
+  });
+}
+
+docs {
+  List only the OpenClaw chat sessions on this instance via the `?agent=` filter
+  (`hermes` | `openclaw`). Newest first. Omit the filter (see "09 List Sessions")
+  to list every session. Unknown agent values return a 400 validation_error.
+}
