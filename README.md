@@ -160,7 +160,7 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 
 | Action | Endpoint |
 | --- | --- |
-| List | `GET /v1/sessions` → `{ data: [...] }` |
+| List | `GET /v1/sessions` → `{ data: [...] }` (filter with `?agent=hermes\|openclaw`) |
 | Retrieve, with history | `GET /v1/sessions/{id}` |
 | Delete | `DELETE /v1/sessions/{id}` |
 

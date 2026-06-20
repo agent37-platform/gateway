@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import type { SessionMessage } from '../../shared/types.js';
+import { SUPPORTED_AGENTS } from '../../shared/types.js';
 import { getAdapter } from '../agent.js';
-import { gatewayErrorFromWorker, sessionNotFound } from '../errors.js';
+import { gatewayErrorFromWorker, sessionNotFound, validationError } from '../errors.js';
 import {
   deleteResponsesForSession,
   deleteSession,
@@ -11,9 +12,14 @@ import {
 
 export const sessionsRouter = Router();
 
-// GET /v1/sessions — list the sessions on this instance.
-sessionsRouter.get('/', (_req, res) => {
-  res.json({ data: listSessions() });
+// GET /v1/sessions — list the sessions on this instance, optionally filtered
+// by agent (e.g. `?agent=openclaw` for OpenClaw chat history).
+sessionsRouter.get('/', (req, res, next) => {
+  const agent = req.query.agent;
+  if (agent !== undefined && !SUPPORTED_AGENTS.includes(agent as never)) {
+    return next(validationError(`Unknown agent: ${agent}`, 'agent'));
+  }
+  res.json({ data: listSessions(agent as never) });
 });
 
 // GET /v1/sessions/:id — the session with its full transcript history.
