@@ -1,24 +1,19 @@
 # Agent37 Gateway
 
-**One API to talk to an agent on an instance.**
+**One API for Agent37 agents.**
 
-The Agent37 Gateway runs inside each agent instance and exposes a small,
-Responses-style HTTP API. You send it a turn; it routes that turn to the
-instance's agent, streams the work back, and keeps the conversation going. The
-streaming contract and request shape are the same whatever agent is behind it —
-so client code doesn't change when the agent does.
+The Agent37 Gateway exposes a small, Responses-style HTTP API for talking to an
+Agent37 agent. You send it a turn; it routes that turn to the agent, streams the
+work back, and keeps the conversation going. The streaming contract and request
+shape are the same whatever agent is behind it — so client code doesn't change
+when the agent does.
 
 Today it routes to **Hermes** (the default) and **OpenClaw** — pick per request
 with the `agent` field. The adapter seam is built so **Claude Code** slots in
 next.
 
-> This is the per-instance request plane. Creating, sizing, and billing
-> instances is the job of the Agent37 Cloud control plane, which routes a
-> request to the right container and forwards it here. Inside the container
-> there is exactly one gateway, and it has no concept of instances — it just
-> answers.
-
-MIT licensed.
+> Want the hosted API? Use [Agent37 Cloud](https://www.agent37.com/cloud). This
+> repo is the gateway service that powers an Agent37 agent.
 
 ## How it talks to Hermes
 
@@ -65,21 +60,42 @@ server-side).
 
 ## Quickstart
 
-**Prerequisites:** Node.js 24+ and a working [Hermes](https://hermes-agent.nousresearch.com)
-install (the worker auto-detects `~/.hermes/hermes-agent`; override with
-`HERMES_AGENT_DIR` / `HERMES_PYTHON`).
+**Prerequisites:**
+
+- Node.js 24+
+- A working [Hermes](https://hermes-agent.nousresearch.com) install with a
+  configured model/provider
+
+The server itself is Node, but useful agent calls need Hermes. The worker
+auto-detects `~/.hermes/hermes-agent` or the `hermes` CLI install; override with
+`HERMES_AGENT_DIR` / `HERMES_PYTHON` when Hermes lives somewhere else.
 
 ```bash
 npm install
-npm run dev          # tsx watch on http://localhost:3737
-# or
-npm run prod         # build + run the compiled server
+npm run selftest:worker
+npm run dev              # tsx watch on http://localhost:3737
 ```
 
-Check the worker can reach Hermes without booting the server:
+Expected self-test output includes `"ok": true`. If it reports `import_error`,
+set `HERMES_PYTHON` to the Python inside the Hermes virtualenv, for example:
 
 ```bash
-npm run selftest:worker
+HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python npm run selftest:worker
+```
+
+Then sanity-check the HTTP server:
+
+```bash
+curl http://localhost:3737/v1/health
+curl http://localhost:3737/v1/responses \
+  -H 'content-type: application/json' \
+  -d '{"input":"hello"}'
+```
+
+For a production-style local run:
+
+```bash
+npm run prod             # build + run the compiled server
 ```
 
 ## API
