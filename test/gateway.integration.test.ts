@@ -94,6 +94,19 @@ test('responses and sessions work end-to-end through the local LLM', async () =>
   const sessions = await jsonOk<{ data: Array<{ id: string }> }>(await fetch(`${base}/v1/sessions`));
   assert.ok(sessions.data.some((session) => session.id === created.session_id));
 
+  // The optional ?agent= filter narrows the list to one agent; an unknown agent is a 400.
+  const hermesSessions = await jsonOk<{ data: Array<{ id: string; agent: string }> }>(
+    await fetch(`${base}/v1/sessions?agent=hermes`),
+  );
+  assert.ok(hermesSessions.data.some((session) => session.id === created.session_id));
+  assert.ok(hermesSessions.data.every((session) => session.agent === 'hermes'));
+
+  const badFilter = await fetch(`${base}/v1/sessions?agent=bogus`);
+  assert.equal(badFilter.status, 400);
+  const badBody = (await badFilter.json()) as { error: { code: string; param: string } };
+  assert.equal(badBody.error.code, 'validation_error');
+  assert.equal(badBody.error.param, 'agent');
+
   const session = await jsonOk<{
     id: string;
     history: Array<{ role: string; content: string }>;

@@ -6,7 +6,7 @@ import {
   RESPONSE_MODES,
   SUPPORTED_AGENTS,
 } from '../../shared/types.js';
-import { isRecord, responseNotFound, validationError } from '../errors.js';
+import { isRecord, optionalEnum, responseNotFound, validationError } from '../errors.js';
 import { resolveHomeAwarePath } from '../paths.js';
 import { initSSE, writeStreamEvent } from '../sse.js';
 import { attach, hasRun } from '../live-runs.js';
@@ -34,23 +34,6 @@ function optionalString(value: unknown, field: string): string | null {
     throw validationError(`${field} must be a non-empty string.`, field);
   }
   return value;
-}
-
-/** An optional field constrained to a fixed set: absent → `fallback`, present →
- *  validated against `allowed` (throws otherwise). */
-function optionalEnum<T extends string>(value: unknown, field: string, allowed: readonly T[], fallback: T): T;
-function optionalEnum<T extends string>(value: unknown, field: string, allowed: readonly T[], fallback: null): T | null;
-function optionalEnum<T extends string>(
-  value: unknown,
-  field: string,
-  allowed: readonly T[],
-  fallback: T | null,
-): T | null {
-  if (value === undefined || value === null) return fallback;
-  if (typeof value !== 'string' || !allowed.includes(value as T)) {
-    throw validationError(`${field} must be one of: ${allowed.join(', ')}.`, field);
-  }
-  return value as T;
 }
 
 /** Validate `files` attachment paths: each must name an existing regular file

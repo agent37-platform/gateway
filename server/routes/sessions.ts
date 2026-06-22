@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import type { SessionMessage } from '../../shared/types.js';
+import { SUPPORTED_AGENTS } from '../../shared/types.js';
 import { getAdapter } from '../agent.js';
-import { gatewayErrorFromWorker, sessionNotFound } from '../errors.js';
+import { gatewayErrorFromWorker, optionalEnum, sessionNotFound } from '../errors.js';
 import {
   deleteResponsesForSession,
   deleteSession,
@@ -11,9 +12,16 @@ import {
 
 export const sessionsRouter = Router();
 
-// GET /v1/sessions — list the sessions on this instance.
-sessionsRouter.get('/', (_req, res) => {
-  res.json({ data: listSessions() });
+// GET /v1/sessions — list the sessions on this instance, optionally filtered by agent.
+sessionsRouter.get('/', (req, res, next) => {
+  try {
+    // `?agent=` (empty) is treated as absent → all sessions; an unknown agent is a 400.
+    const raw = req.query.agent === '' ? undefined : req.query.agent;
+    const agent = optionalEnum(raw, 'agent', SUPPORTED_AGENTS, null);
+    res.json({ data: listSessions(agent) });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // GET /v1/sessions/:id — the session with its full transcript history.

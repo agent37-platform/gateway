@@ -158,7 +158,7 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 
 | Action | Endpoint |
 | --- | --- |
-| List | `GET /v1/sessions` → `{ data: [...] }` |
+| List | `GET /v1/sessions` → `{ data: [...] }` (optional `?agent=hermes` filters to one agent) |
 | Retrieve, with history | `GET /v1/sessions/{id}` |
 | Delete | `DELETE /v1/sessions/{id}` |
 
