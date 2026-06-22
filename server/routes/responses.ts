@@ -1,10 +1,10 @@
 import { statSync } from 'node:fs';
 import { Router } from 'express';
 import {
-  DEFAULT_AGENT,
   REASONING_EFFORTS,
   RESPONSE_MODES,
   SUPPORTED_AGENTS,
+  resolveConfiguredDefaultAgent,
 } from '../../shared/types.js';
 import { isRecord, responseNotFound, validationError } from '../errors.js';
 import { resolveHomeAwarePath } from '../paths.js';
@@ -27,6 +27,11 @@ export const responsesRouter = Router();
 // and ticks a whitespace heartbeat while the turn runs: leading whitespace before a JSON
 // document is still valid JSON (RFC 8259), so clients parse the body unchanged.
 const NONSTREAM_HEARTBEAT_MS = Number(process.env.GATEWAY_NONSTREAM_HEARTBEAT_MS) || 25_000;
+
+// One gateway serves one agent backend per instance. The image sets
+// GATEWAY_DEFAULT_AGENT to what it bakes, so a turn that omits `agent` routes to
+// the right backend (the OpenClaw image sets "openclaw"). Resolved once at load.
+const INSTANCE_DEFAULT_AGENT = resolveConfiguredDefaultAgent(process.env.GATEWAY_DEFAULT_AGENT);
 
 function optionalString(value: unknown, field: string): string | null {
   if (value === undefined || value === null) return null;
@@ -98,7 +103,7 @@ function parseResponseBody(body: unknown): { request: ResponseRequest; stream: b
     sessionId = b.session_id;
   }
 
-  const agent = optionalEnum(b.agent, 'agent', SUPPORTED_AGENTS, DEFAULT_AGENT);
+  const agent = optionalEnum(b.agent, 'agent', SUPPORTED_AGENTS, INSTANCE_DEFAULT_AGENT);
 
   const mode = optionalEnum(b.mode, 'mode', RESPONSE_MODES, 'chat');
   if (mode === 'goal') {
