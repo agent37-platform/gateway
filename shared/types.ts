@@ -21,6 +21,15 @@ export const SUPPORTED_AGENTS = ['hermes', 'openclaw'] as const;
 export type AgentType = (typeof SUPPORTED_AGENTS)[number];
 export const DEFAULT_AGENT: AgentType = 'hermes';
 
+/** The agent a turn routes to when the request omits `agent`. One gateway runs
+ *  one agent backend per instance, so the image sets GATEWAY_DEFAULT_AGENT to
+ *  match what it bakes (the OpenClaw image sets it to "openclaw"); unset or
+ *  unknown falls back to DEFAULT_AGENT, preserving Hermes-image behavior. */
+export function resolveConfiguredDefaultAgent(raw: string | undefined | null): AgentType {
+  const value = (raw ?? '').trim();
+  return (SUPPORTED_AGENTS as readonly string[]).includes(value) ? (value as AgentType) : DEFAULT_AGENT;
+}
+
 /** Safety cap for goal mode. Keep in sync with GOAL_MAX_TURNS in hermes_worker.py. */
 export const GOAL_MAX_TURNS = 20;
 
