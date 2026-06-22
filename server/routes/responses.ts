@@ -4,9 +4,9 @@ import {
   REASONING_EFFORTS,
   RESPONSE_MODES,
   SUPPORTED_AGENTS,
-  resolveConfiguredDefaultAgent,
 } from '../../shared/types.js';
 import { isRecord, optionalEnum, responseNotFound, validationError } from '../errors.js';
+import { INSTANCE_DEFAULT_AGENT } from '../agent.js';
 import { resolveHomeAwarePath } from '../paths.js';
 import { initSSE, writeStreamEvent } from '../sse.js';
 import { attach, hasRun } from '../live-runs.js';
@@ -27,11 +27,6 @@ export const responsesRouter = Router();
 // and ticks a whitespace heartbeat while the turn runs: leading whitespace before a JSON
 // document is still valid JSON (RFC 8259), so clients parse the body unchanged.
 const NONSTREAM_HEARTBEAT_MS = Number(process.env.GATEWAY_NONSTREAM_HEARTBEAT_MS) || 25_000;
-
-// One gateway serves one agent backend per instance. The image sets
-// GATEWAY_DEFAULT_AGENT to what it bakes, so a turn that omits `agent` routes to
-// the right backend (the OpenClaw image sets "openclaw"). Resolved once at load.
-const INSTANCE_DEFAULT_AGENT = resolveConfiguredDefaultAgent(process.env.GATEWAY_DEFAULT_AGENT);
 
 function optionalString(value: unknown, field: string): string | null {
   if (value === undefined || value === null) return null;

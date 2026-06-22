@@ -66,7 +66,12 @@ async function waitForTerminalResponse(responseId: string): Promise<ResponseBody
 }
 
 test('health, version, and models endpoints answer from the real gateway', async () => {
-  assert.deepEqual(await jsonOk(await fetch(`${base}/v1/health`)), { ok: true, hermes: true });
+  assert.deepEqual(await jsonOk(await fetch(`${base}/v1/health`)), {
+    ok: true,
+    agent: 'hermes',
+    healthy: true,
+    hermes: true,
+  });
 
   const version = await jsonOk<{ name: string; version: string }>(await fetch(`${base}/v1/version`));
   assert.equal(version.name, 'agent37-gateway');

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { ModelInfo } from '../../shared/types.js';
-import { adapter } from '../agent.js';
+import { getDefaultAdapter } from '../agent.js';
 import { gatewayErrorFromWorker } from '../errors.js';
 
 export const modelsRouter = Router();
@@ -8,7 +8,7 @@ export const modelsRouter = Router();
 // GET /v1/models — the models this instance's agent can run on.
 modelsRouter.get('/', async (_req, res, next) => {
   try {
-    const models = await adapter.getModels();
+    const models = await getDefaultAdapter().getModels();
     const data: ModelInfo[] = [];
     for (const group of models.groups) {
       for (const model of group.models) {
