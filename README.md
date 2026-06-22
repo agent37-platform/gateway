@@ -47,14 +47,41 @@ State is split deliberately:
 
 The OpenClaw adapter is plain HTTP: it forwards turns to OpenClaw's own gateway
 (`POST /v1/responses`, OpenResponses-compatible) at `OPENCLAW_BASE_URL`
-(defaults to a local OpenClaw when unset), authenticated with `OPENCLAW_TOKEN`. The
-responses endpoint must be enabled in `openclaw.json`
-(`gateway.http.endpoints.responses.enabled`).
+(defaults to a local OpenClaw, `http://localhost:18789`, when unset),
+authenticated with `OPENCLAW_TOKEN`.
 
 OpenClaw has no HTTP API for session history, deletion, or cancelling a turn,
 so for `openclaw` sessions: `GET /v1/sessions/{id}` returns empty history,
 `DELETE` only removes the gateway's own records, and cancel aborts the
 gateway-side stream (OpenClaw may keep working server-side).
+
+### Set up OpenClaw
+
+Two steps, both reading from your `~/.openclaw/openclaw.json`:
+
+1. **Enable the responses endpoint.** Add an `http` block under `gateway` in
+   `~/.openclaw/openclaw.json`, then restart OpenClaw:
+
+   ```jsonc
+   "gateway": {
+     // …your existing config…
+     "http": {
+       "endpoints": {
+         "responses": { "enabled": true }
+       }
+     }
+   }
+   ```
+
+2. **Set the token.** Copy `gateway.auth.token` from that same file into
+   `OPENCLAW_TOKEN` in your `.env`:
+
+   ```bash
+   OPENCLAW_TOKEN=<gateway.auth.token from openclaw.json>
+   ```
+
+Then route any turn to it with `"agent": "openclaw"`. If OpenClaw runs somewhere
+other than `http://localhost:18789`, set `OPENCLAW_BASE_URL` too.
 
 ## Quickstart
 
