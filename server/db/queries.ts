@@ -82,7 +82,9 @@ const stmtInsertSession = db.prepare(`
 `);
 const stmtGetSession = db.prepare('SELECT * FROM sessions WHERE id = ?');
 const stmtListSessions = db.prepare('SELECT * FROM sessions ORDER BY created DESC');
-const stmtListSessionsByAgent = db.prepare('SELECT * FROM sessions WHERE agent = ? ORDER BY created DESC');
+const stmtListSessionsByAgent = db.prepare(
+  'SELECT * FROM sessions WHERE agent = ? ORDER BY created DESC',
+);
 const stmtSetSessionModel = db.prepare('UPDATE sessions SET model = @model, provider = @provider WHERE id = @id');
 const stmtMarkSessionResponded = db.prepare('UPDATE sessions SET last_response_at = @at WHERE id = @id');
 const stmtDeleteSession = db.prepare('DELETE FROM sessions WHERE id = ?');
@@ -110,7 +112,7 @@ export function getSession(id: string): SessionObject | undefined {
   return row ? rowToSession(row) : undefined;
 }
 
-export function listSessions(agent?: AgentType): SessionObject[] {
+export function listSessions(agent?: AgentType | null): SessionObject[] {
   const rows = (agent ? stmtListSessionsByAgent.all(agent) : stmtListSessions.all()) as SessionRow[];
   return rows.map(rowToSession);
 }

@@ -37,6 +37,23 @@ export function validationError(message: string, param?: string, hint?: string):
   return new GatewayError(400, 'validation_error', message, { param, hint });
 }
 
+/** An optional field constrained to a fixed set: absent → `fallback`, present →
+ *  validated against `allowed` (throws `validationError` otherwise). */
+export function optionalEnum<T extends string>(value: unknown, field: string, allowed: readonly T[], fallback: T): T;
+export function optionalEnum<T extends string>(value: unknown, field: string, allowed: readonly T[], fallback: null): T | null;
+export function optionalEnum<T extends string>(
+  value: unknown,
+  field: string,
+  allowed: readonly T[],
+  fallback: T | null,
+): T | null {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'string' || !allowed.includes(value as T)) {
+    throw validationError(`${field} must be one of: ${allowed.join(', ')}.`, field);
+  }
+  return value as T;
+}
+
 export function sessionNotFound(id: string): GatewayError {
   return new GatewayError(404, 'session_not_found', `No session with id '${id}'.`);
 }

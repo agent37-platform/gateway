@@ -1,7 +1,7 @@
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
-import { adapter } from './agent.js';
+import { INSTANCE_DEFAULT_AGENT, getDefaultAdapter } from './agent.js';
 import { responsesRouter } from './routes/responses.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { modelsRouter } from './routes/models.js';
@@ -17,8 +17,16 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/v1/health', async (_req, res) => {
-  const hermes = await adapter.healthCheck();
-  res.json({ ok: true, hermes });
+  // Probe the instance's configured backend, not always Hermes. `hermes` is kept
+  // for backward compatibility on the Hermes image (same value as before) and
+  // omitted otherwise; `agent`/`healthy` are the backend-neutral fields.
+  const healthy = await getDefaultAdapter().healthCheck();
+  res.json({
+    ok: true,
+    agent: INSTANCE_DEFAULT_AGENT,
+    healthy,
+    ...(INSTANCE_DEFAULT_AGENT === 'hermes' ? { hermes: healthy } : {}),
+  });
 });
 
 app.get('/v1/version', (_req, res) => {
