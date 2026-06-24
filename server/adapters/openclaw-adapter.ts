@@ -8,8 +8,11 @@ import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
 
 // OpenClaw's gateway serves an OpenResponses-compatible `POST /v1/responses`
 // (must be enabled via `gateway.http.endpoints.responses.enabled` in
-// openclaw.json) plus `GET /v1/models` and `/health`. There is no HTTP API for
-// session history, deletion, or cancelling a turn.
+// openclaw.json) plus `GET /v1/models` and `/health`. Session history reads
+// through `GET /sessions/{key}/history`, where the key is
+// `openresponses-user:{user}` — OpenClaw stores each turn we send under the
+// `user` we pass and resolves that partial key to the full session. There is
+// no HTTP route to delete a stored transcript, nor to cancel a turn.
 export const DEFAULT_BASE_URL = 'http://localhost:18789';
 
 function baseUrl(): string {
@@ -19,6 +22,14 @@ function baseUrl(): string {
 function authHeaders(): Record<string, string> {
   const token = process.env.OPENCLAW_TOKEN?.trim();
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+// OpenClaw serves its web UI as a catch-all, so an unknown route (e.g. an older
+// OpenClaw without the /sessions/{key}/history route) answers 200 text/html
+// rather than 404. Treat any non-JSON body as "endpoint absent" so we degrade
+// to empty history instead of choking on `<!doctype …>` in res.json().
+function isJson(res: Response): boolean {
+  return res.headers.get('content-type')?.includes('application/json') ?? false;
 }
 
 async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<{ event: string; data: string }> {
@@ -59,6 +70,27 @@ interface OpenResponsesEnvelope {
     error?: { code?: string; message?: string };
   };
   delta?: string;
+}
+
+// `GET /sessions/{key}/history` message shape. `content` is polymorphic: a bare
+// string, or an array of typed blocks (text / thinking / toolCall). Assistant
+// turns also carry per-turn `usage` and the resolved `model`.
+type OpenClawBlock = { type: string; text?: string; thinking?: string };
+interface OpenClawMessage {
+  role: 'user' | 'assistant' | 'toolResult' | 'system';
+  content: string | OpenClawBlock[];
+  timestamp: number;
+  model?: string;
+  usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: { total?: number } };
+}
+
+// Flatten block content (or a bare string) to plain text of one kind.
+function blockText(content: string | OpenClawBlock[], kind: 'text' | 'thinking'): string {
+  if (typeof content === 'string') return kind === 'text' ? content : '';
+  return content
+    .filter((b) => b.type === kind)
+    .map((b) => (kind === 'text' ? b.text : b.thinking) ?? '')
+    .join('');
 }
 
 // The gateway accepts none..xhigh; OpenClaw only low|medium|high. 'none' is intentionally
@@ -179,15 +211,69 @@ export class OpenClawAdapter implements AgentAdapter {
     }
   }
 
-  async getMessages(): Promise<HermesMessage[]> {
-    return [];
+  // Raw transcript for a session, read through OpenClaw's history endpoint. The
+  // `user` we send on each turn keys the session as `openresponses-user:{user}`,
+  // which OpenClaw resolves from this partial key.
+  private async fetchHistory(sessionId: string): Promise<OpenClawMessage[]> {
+    const key = `openresponses-user:${sessionId}`;
+    const res = await fetch(
+      `${baseUrl()}/sessions/${encodeURIComponent(key)}/history?limit=500`,
+      { headers: authHeaders() },
+    );
+    if (res.status === 404 || !isJson(res)) return []; // unknown session / no history API
+    if (!res.ok) throw new Error(`OpenClaw GET /sessions/{key}/history → ${res.status}`);
+    const { messages } = await res.json() as { messages?: OpenClawMessage[] };
+    return messages ?? [];
   }
 
-  async getSessionMetadata(): Promise<SessionMetadata | null> {
-    return null;
+  async getMessages(sessionId: string): Promise<HermesMessage[]> {
+    const messages = await this.fetchHistory(sessionId);
+    // Keep user/assistant turns with visible text; tool plumbing (toolResult,
+    // tool-call-only turns) is dropped. Reasoning rides along when present.
+    return messages
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: blockText(m.content, 'text'),
+        thinking: blockText(m.content, 'thinking') || undefined,
+        created_at: m.timestamp,
+      }))
+      .filter((m) => m.content.length > 0)
+      .map((m, i) => ({ id: `openclaw:${sessionId}:${i}`, task_id: sessionId, ...m }));
+  }
+
+  async getSessionMetadata(sessionId: string): Promise<SessionMetadata | null> {
+    const messages = await this.fetchHistory(sessionId);
+    if (messages.length === 0) return null;
+    // OpenClaw has no HTTP session-meta route; aggregate the per-turn usage that
+    // rides on assistant messages instead.
+    const meta: SessionMetadata = {
+      id: sessionId,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      reasoning_tokens: 0,
+      estimated_cost_usd: 0,
+      cost_status: null,
+      model: null,
+    };
+    for (const m of messages) {
+      if (m.role !== 'assistant' || !m.usage) continue;
+      meta.input_tokens += m.usage.input ?? 0;
+      meta.output_tokens += m.usage.output ?? 0;
+      meta.cache_read_tokens += m.usage.cacheRead ?? 0;
+      meta.cache_write_tokens += m.usage.cacheWrite ?? 0;
+      meta.estimated_cost_usd = (meta.estimated_cost_usd ?? 0) + (m.usage.cost?.total ?? 0);
+      if (m.model) meta.model = m.model;
+    }
+    return meta;
   }
 
   async deleteSession(): Promise<boolean> {
+    // OpenClaw 2026.6.5 exposes no HTTP route to delete a stored transcript
+    // (only `/sessions/{key}/kill`, which aborts an active run). The gateway
+    // still drops its own records; OpenClaw keeps its copy.
     return false;
   }
 

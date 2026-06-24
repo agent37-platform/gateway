@@ -287,6 +287,13 @@ test('openclaw responses complete, stream, and stay on one session', { skip: ope
   assert.equal(recalled.session_id, created.session_id);
   assert.ok(recalled.output_text.includes(marker));
 
+  // History reads back through OpenClaw's GET /sessions/{key}/history.
+  const session = await jsonOk<{ history: { role: string; content: string }[] }>(
+    await fetch(`${base}/v1/sessions/${created.session_id}`),
+  );
+  assert.ok(session.history.some((m) => m.role === 'user' && m.content.includes(marker)));
+  assert.ok(session.history.some((m) => m.role === 'assistant' && m.content.includes(marker)));
+
   const stream = await postJson(base, {
     agent: 'openclaw',
     input: 'Reply with one short sentence.',

@@ -165,12 +165,14 @@ def _error_payload(exc: BaseException) -> dict[str, str]:
     elif "unauthorized" in lower or "authentication" in lower or "401" in lower or "api key" in lower:
         code = "auth_error"
         hint = "Run hermes model or update ~/.hermes/config.yaml credentials."
+    elif "instance_budget_exhausted" in lower or "budget exhausted" in lower or "insufficient_balance" in lower:
+        # Checked before "rate limit": a budget refusal often reaches us as
+        # "Rate limited after N retries — HTTP 402: Instance budget exhausted…".
+        code = "quota_exhausted"
+        hint = "Raise the instance budget or top up the workspace balance."
     elif "rate limit" in lower or "429" in lower:
         code = "rate_limit"
         hint = "Retry later or switch provider/model."
-    elif "instance_budget_exhausted" in lower or "insufficient_balance" in lower:
-        code = "quota_exhausted"
-        hint = "Raise the instance budget or top up the workspace balance."
     elif "quota" in lower or "credit" in lower or "insufficient" in lower:
         code = "quota_exhausted"
         hint = "Top up provider account or switch provider/model."
@@ -1326,7 +1328,12 @@ def _run_chat(request_id: str, request: dict[str, Any]) -> None:
 
     failure_message = _agent_failure_message(final_text)
     if failure_message:
-        raise WorkerError(failure_message, code="provider_error")
+        # The agent surfaced a provider-call failure as its reply (every retry
+        # refused). Classify it so budget/rate-limit/auth refusals get their
+        # specific code, falling back to a generic provider_error otherwise.
+        payload = _error_payload(RuntimeError(failure_message))
+        code = payload["code"] if payload["code"] != "worker_error" else "provider_error"
+        raise WorkerError(failure_message, code=code, hint=payload.get("hint"))
 
     if final_text and not state["text"]:
         _send({"id": request_id, "type": "text_delta", "content": final_text})

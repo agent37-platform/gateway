@@ -50,10 +50,14 @@ The OpenClaw adapter is plain HTTP: it forwards turns to OpenClaw's own gateway
 (defaults to a local OpenClaw, `http://localhost:18789`, when unset),
 authenticated with `OPENCLAW_TOKEN`.
 
-OpenClaw has no HTTP API for session history, deletion, or cancelling a turn,
-so for `openclaw` sessions: `GET /v1/sessions/{id}` returns empty history,
-`DELETE` only removes the gateway's own records, and cancel aborts the
-gateway-side stream (OpenClaw may keep working server-side).
+Session history reads through OpenClaw's `GET /sessions/{key}/history`, where the
+key is `openresponses-user:{user}` — OpenClaw stores each turn under the `user`
+we send (the gateway session id) and resolves that partial key to the full
+session. `GET /v1/sessions/{id}` projects that transcript. OpenClaw exposes no
+HTTP route to delete a stored transcript, so `DELETE /v1/sessions/{id}` drops the
+gateway's own records while OpenClaw keeps its copy; likewise there is no cancel
+API, so cancel aborts the gateway-side stream only (OpenClaw may keep working
+server-side).
 
 ### Set up OpenClaw
 
@@ -185,7 +189,7 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 
 | Action | Endpoint |
 | --- | --- |
-| List | `GET /v1/sessions` → `{ data: [...] }` (optional `?agent=hermes` filters to one agent) |
+| List | `GET /v1/sessions` → `{ data: [...] }` (filter with `?agent=hermes\|openclaw`) |
 | Retrieve, with history | `GET /v1/sessions/{id}` |
 | Delete | `DELETE /v1/sessions/{id}` |
 

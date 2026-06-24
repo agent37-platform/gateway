@@ -1,0 +1,32 @@
+meta {
+  name: 16 Get Session (openclaw history)
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions/{{openclawSessionId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("includes transcript history", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("openclawSessionId"));
+    expect(res.body.agent).to.equal("openclaw");
+    expect(res.body.history).to.be.an("array");
+  });
+}
+
+docs {
+  The OpenClaw session plus its transcript. Reuses `openclawSessionId` saved by
+  "13 Create Response (openclaw)". History is projected on demand from OpenClaw's
+  `/v1/conversations/{user}` endpoint — the gateway never duplicates messages.
+
+  OpenClaw must expose that read endpoint for history to be non-empty; otherwise
+  `history` comes back as an empty array.
+}

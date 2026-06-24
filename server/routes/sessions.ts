@@ -12,7 +12,8 @@ import {
 
 export const sessionsRouter = Router();
 
-// GET /v1/sessions — list the sessions on this instance, optionally filtered by agent.
+// GET /v1/sessions — list the sessions on this instance, optionally filtered
+// by agent (e.g. `?agent=openclaw` for OpenClaw chat history).
 sessionsRouter.get('/', (req, res, next) => {
   try {
     // `?agent=` (empty) is treated as absent → all sessions; an unknown agent is a 400.
