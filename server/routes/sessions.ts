@@ -1,68 +1,76 @@
 import { Router } from 'express';
-import type { SessionMessage } from '../../shared/types.js';
-import { SUPPORTED_AGENTS } from '../../shared/types.js';
-import { getAdapter } from '../agent.js';
-import { gatewayErrorFromWorker, optionalEnum, queryParam, sessionNotFound } from '../errors.js';
-import {
-  deleteResponsesForSession,
-  deleteSession,
-  getSession,
-  listSessions,
-} from '../db/queries.js';
+import type { AgentType, SessionMessage } from '../../shared/types.js';
+import { getAdapter, agentFromQuery } from '../agent.js';
+import { gatewayErrorFromWorker, renameUnsupported, validationError } from '../errors.js';
 
 export const sessionsRouter = Router();
 
-// GET /v1/sessions — list the sessions on this instance, optionally filtered
-// by agent (e.g. `?agent=openclaw` for OpenClaw chat history).
-sessionsRouter.get('/', (req, res, next) => {
+// GET /v1/sessions?agent= — list a harness's sessions straight from its own
+// store, native fields untouched. The harness owns the transcript and the index;
+// the gateway keeps none. Harnesses without a list API (OpenClaw) return [].
+sessionsRouter.get('/', async (req, res, next) => {
+  let agent: AgentType | undefined;
   try {
-    // `?agent=` (empty) is treated as absent → all sessions; an unknown agent is a 400.
-    const agent = optionalEnum(queryParam(req.query.agent), 'agent', SUPPORTED_AGENTS, null);
-    res.json({ data: listSessions(agent) });
+    agent = agentFromQuery(req.query.agent);
+    const data = await getAdapter(agent).listSessions();
+    res.json({ agent, data });
   } catch (error) {
-    next(error);
+    next(gatewayErrorFromWorker(error, 'Could not list sessions', agent));
   }
 });
 
-// GET /v1/sessions/:id — the session with its full transcript history.
+// GET /v1/sessions/:id?agent= — the session's transcript, projected from the
+// harness. An unknown id projects to empty history rather than 404 — the harness
+// owns existence.
 sessionsRouter.get('/:id', async (req, res, next) => {
-  const session = getSession(req.params.id);
-  if (!session) return next(sessionNotFound(req.params.id));
-
-  // No turns yet → no backend session exists, so history is empty.
-  if (session.last_response_at === null) {
-    return res.json({ ...session, history: [] });
-  }
-
+  let agent: AgentType | undefined;
   try {
-    const messages = await getAdapter(session.agent).getMessages(session.id);
+    agent = agentFromQuery(req.query.agent);
+    const messages = await getAdapter(agent).getMessages(req.params.id);
     const history: SessionMessage[] = messages.map((m) => ({
       id: m.id,
-      session_id: session.id,
+      session_id: req.params.id,
       role: m.role,
       content: m.content,
       thinking: m.thinking,
       created_at: m.created_at,
     }));
-    res.json({ ...session, history });
+    res.json({ id: req.params.id, agent, history });
   } catch (error) {
-    next(gatewayErrorFromWorker(error, 'Session history unavailable'));
+    next(gatewayErrorFromWorker(error, 'Session history unavailable', agent));
   }
 });
 
-// DELETE /v1/sessions/:id — remove the conversation and its history.
+// DELETE /v1/sessions/:id?agent= — best-effort removal from the harness.
 sessionsRouter.delete('/:id', async (req, res, next) => {
-  const session = getSession(req.params.id);
-  if (!session) return next(sessionNotFound(req.params.id));
-
-  // Best-effort removal of the harness backend's transcript before dropping our records.
+  let agent: AgentType | undefined;
   try {
-    await getAdapter(session.agent).deleteSession(session.id);
-  } catch {
-    // The gateway's own records still get cleaned up below.
+    agent = agentFromQuery(req.query.agent);
+    const deleted = await getAdapter(agent).deleteSession(req.params.id);
+    res.json({ id: req.params.id, deleted });
+  } catch (error) {
+    next(gatewayErrorFromWorker(error, 'Could not delete session', agent));
   }
-  deleteResponsesForSession(session.id);
-  deleteSession(session.id);
+});
 
-  res.json({ id: session.id, deleted: true });
+// PATCH /v1/sessions/:id?agent= — rename a session by writing its title into the
+// harness's own store (no gateway DB). Only harnesses that natively store an
+// editable title implement it; the rest (OpenClaw) answer 405.
+sessionsRouter.patch('/:id', async (req, res, next) => {
+  let agent: AgentType | undefined;
+  try {
+    agent = agentFromQuery(req.query.agent);
+    const adapter = getAdapter(agent);
+    if (!adapter.renameSession) throw renameUnsupported(agent);
+
+    const title = (req.body as { title?: unknown } | undefined)?.title;
+    if (typeof title !== 'string' || title.trim() === '') {
+      throw validationError('title is required.', 'title');
+    }
+
+    const renamed = await adapter.renameSession(req.params.id, title);
+    res.json({ id: req.params.id, agent, renamed });
+  } catch (error) {
+    next(gatewayErrorFromWorker(error, 'Could not rename session', agent));
+  }
 });

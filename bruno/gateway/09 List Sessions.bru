@@ -21,6 +21,8 @@ tests {
 }
 
 docs {
-  All sessions on this instance, newest first. Filter by backend with
-  `?agent=hermes|openclaw` (see "09 List Sessions (openclaw)").
+  The default harness's sessions (or the one named by `?agent=hermes|openclaw`,
+  see "09 List Sessions (openclaw)"), projected from that harness's own store.
+  Response shape: `{ agent, data }`. Each harness owns its own index — there is
+  no merged all-harness listing.
 }

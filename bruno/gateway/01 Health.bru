@@ -22,7 +22,8 @@ tests {
 }
 
 docs {
-  Liveness + whether the instance's configured default backend is reachable.
-  Returns `{ ok, agent, healthy }` (plus a legacy `hermes` field when the default
-  is Hermes). No auth — the gateway runs on localhost behind the host/Docker.
+  Liveness + whether a harness backend is reachable. Defaults to the instance's
+  configured backend; add `?agent=hermes|openclaw` to target one explicitly.
+  Returns `{ ok, agent, healthy }` (plus a legacy `hermes` field when Hermes is
+  probed). No auth — the gateway runs on localhost behind the host/Docker.
 }

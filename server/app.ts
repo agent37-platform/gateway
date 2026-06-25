@@ -1,7 +1,7 @@
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
-import { INSTANCE_DEFAULT_AGENT, getDefaultAdapter } from './agent.js';
+import { getAdapter, agentFromQuery } from './agent.js';
 import { responsesRouter } from './routes/responses.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { modelsRouter } from './routes/models.js';
@@ -16,17 +16,21 @@ app.use(cors());
 // an oversized body can't be a memory vector; oversize → 413 payload_too_large.
 app.use(express.json({ limit: '2mb' }));
 
-app.get('/v1/health', async (_req, res) => {
-  // Probe the instance's configured backend, not always Hermes. `hermes` is kept
-  // for backward compatibility on the Hermes image (same value as before) and
-  // omitted otherwise; `agent`/`healthy` are the backend-neutral fields.
-  const healthy = await getDefaultAdapter().healthCheck();
-  res.json({
-    ok: true,
-    agent: INSTANCE_DEFAULT_AGENT,
-    healthy,
-    ...(INSTANCE_DEFAULT_AGENT === 'hermes' ? { hermes: healthy } : {}),
-  });
+app.get('/v1/health', async (req, res, next) => {
+  try {
+    // `?agent=` selects the harness; omitted or empty falls back to the configured
+    // default. `hermes` is kept for backward compatibility when Hermes is probed.
+    const agent = agentFromQuery(req.query.agent);
+    const healthy = await getAdapter(agent).healthCheck();
+    res.json({
+      ok: true,
+      agent,
+      healthy,
+      ...(agent === 'hermes' ? { hermes: healthy } : {}),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/v1/version', (_req, res) => {

@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
 export function expandHomePrefix(value: string): string {
@@ -18,14 +18,10 @@ export function resolveHermesHome(): string {
   return resolveHomeAwarePath(configured || '~/.hermes');
 }
 
-/** Root for all gateway state (SQLite db, logs, the agent's workspace). */
+/** Root for all gateway state (logs, the agent's workspace). */
 export function resolveGatewayHome(): string {
   const configured = process.env.AGENT37_GATEWAY_HOME?.trim();
   return resolveHomeAwarePath(configured || '~/.agent37-gateway');
-}
-
-export function resolveGatewayDataDir(): string {
-  return join(resolveGatewayHome(), 'data');
 }
 
 export function resolveGatewayLogsDir(): string {
@@ -43,16 +39,7 @@ export function resolveUploadsDir(): string {
   return join(resolveWorkspaceDir(), 'uploads');
 }
 
-export function resolveGatewayDbPath(): string {
-  const configured = process.env.DB_PATH?.trim();
-  if (configured) return resolveHomeAwarePath(configured);
-  return join(resolveGatewayDataDir(), 'gateway.db');
-}
-
 export function ensureGatewayStateDirs(): void {
-  const dbPath = resolveGatewayDbPath();
-  mkdirSync(resolveGatewayDataDir(), { recursive: true });
   mkdirSync(resolveGatewayLogsDir(), { recursive: true });
   mkdirSync(resolveWorkspaceDir(), { recursive: true });
-  mkdirSync(dirname(dbPath), { recursive: true });
 }

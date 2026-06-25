@@ -1,0 +1,43 @@
+meta {
+  name: 07 Create Response (streaming) (openclaw)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/v1/responses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": "Count from 1 to 5, one number per line.",
+    "agent": "openclaw",
+    "reasoning_effort": "low",
+    "stream": true
+  }
+}
+
+docs {
+  Streaming is agent-agnostic: pass `"agent": "openclaw"` alongside
+  `"stream": true` and the gateway streams the OpenClaw turn back as Server-Sent
+  Events, exactly like the Hermes streaming request above:
+    response.created -> response.reasoning.delta / response.output_text.delta /
+    response.tool_call.* -> response.completed (or response.failed)
+
+  The OpenClaw adapter requests `stream: true` from OpenClaw's own
+  `/v1/responses` and re-streams its SSE, so there's no extra setup beyond a
+  local OpenClaw:
+    openclaw start   (listens on http://localhost:18789)
+
+  Bruno shows the assembled event stream in the Response pane. For raw frames:
+
+    curl -N localhost:3737/v1/responses \
+      -H 'content-type: application/json' \
+      -d '{"input":"hi","agent":"openclaw","stream":true}'
+}

@@ -11,7 +11,8 @@ export interface TestServer {
 
 /**
  * Boot the real Express app on an ephemeral port against a throwaway state dir.
- * Sets the gateway home BEFORE importing the app (the SQLite db opens at import).
+ * Sets the gateway home BEFORE importing the app, so uploads/logs/workspace
+ * resolve under the throwaway state dir.
  */
 export async function startTestServer(): Promise<TestServer> {
   process.env.AGENT37_GATEWAY_HOME = mkdtempSync(join(tmpdir(), 'a37gw-test-'));

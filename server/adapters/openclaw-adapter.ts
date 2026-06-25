@@ -5,6 +5,10 @@ import type {
   SessionMetadata,
 } from '../../shared/types.js';
 import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 // OpenClaw's gateway serves an OpenResponses-compatible `POST /v1/responses`
 // (must be enabled via `gateway.http.endpoints.responses.enabled` in
@@ -12,8 +16,13 @@ import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
 // through `GET /sessions/{key}/history`, where the key is
 // `openresponses-user:{user}` — OpenClaw stores each turn we send under the
 // `user` we pass and resolves that partial key to the full session. There is
-// no HTTP route to delete a stored transcript, nor to cancel a turn.
+// no HTTP route to list sessions or delete a transcript, nor to cancel a turn;
+// `listSessions` therefore shells out to the `openclaw` CLI.
 export const DEFAULT_BASE_URL = 'http://localhost:18789';
+
+// OpenClaw keys each gateway session as `openresponses-user:{gateway session id}`.
+// We build that key when reading history and strip it back off when listing.
+const SESSION_KEY_PREFIX = 'openresponses-user:';
 
 function baseUrl(): string {
   return process.env.OPENCLAW_BASE_URL?.trim().replace(/\/$/, '') || DEFAULT_BASE_URL;
@@ -215,7 +224,7 @@ export class OpenClawAdapter implements AgentAdapter {
   // `user` we send on each turn keys the session as `openresponses-user:{user}`,
   // which OpenClaw resolves from this partial key.
   private async fetchHistory(sessionId: string): Promise<OpenClawMessage[]> {
-    const key = `openresponses-user:${sessionId}`;
+    const key = `${SESSION_KEY_PREFIX}${sessionId}`;
     const res = await fetch(
       `${baseUrl()}/sessions/${encodeURIComponent(key)}/history?limit=500`,
       { headers: authHeaders() },
@@ -224,6 +233,25 @@ export class OpenClawAdapter implements AgentAdapter {
     if (!res.ok) throw new Error(`OpenClaw GET /sessions/{key}/history → ${res.status}`);
     const { messages } = await res.json() as { messages?: OpenClawMessage[] };
     return messages ?? [];
+  }
+
+  async listSessions(): Promise<Record<string, unknown>[]> {
+    // OpenClaw's session list (`sessions.list`) is a gateway RPC, never exposed on
+    // the HTTP surface (only `/sessions/{key}/history` is). The supported machine
+    // path is the `openclaw` CLI, which reads the on-disk session store directly.
+    // We keep the sessions the gateway created — keyed `openresponses-user:{user}`
+    // under the default agent — and surface that `{user}` as `id`, so each entry
+    // round-trips to `GET /v1/sessions/:id` (which reads `openresponses-user:{id}`).
+    const { stdout } = await execFileAsync(
+      'openclaw',
+      ['sessions', 'list', '--json', '--limit', 'all'],
+      { maxBuffer: 16 * 1024 * 1024 },
+    );
+    const { sessions } = JSON.parse(stdout) as { sessions?: Record<string, unknown>[] };
+    return (sessions ?? [])
+      .filter((s): s is Record<string, unknown> & { key: string } =>
+        typeof s.key === 'string' && s.key.includes(SESSION_KEY_PREFIX))
+      .map((s) => ({ ...s, id: s.key.slice(s.key.indexOf(SESSION_KEY_PREFIX) + SESSION_KEY_PREFIX.length) }));
   }
 
   async getMessages(sessionId: string): Promise<HermesMessage[]> {
@@ -273,7 +301,7 @@ export class OpenClawAdapter implements AgentAdapter {
   async deleteSession(): Promise<boolean> {
     // OpenClaw 2026.6.5 exposes no HTTP route to delete a stored transcript
     // (only `/sessions/{key}/kill`, which aborts an active run). The gateway
-    // still drops its own records; OpenClaw keeps its copy.
+    // keeps no records of its own, so a delete is a no-op here.
     return false;
   }
 

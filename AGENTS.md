@@ -11,7 +11,7 @@ Orientation (Node >= 24, TypeScript ESM):
 - `server/routes/` — the `/v1` surface (responses, sessions, models, files)
 - `server/adapters/` — the `AgentAdapter` seam (`types.ts`), the Hermes and OpenClaw adapters, and the JSONL worker protocol (`worker-protocol.ts`)
 - `server/workers/hermes_worker.py` — the Python side; imports Hermes directly. `npm run selftest:worker` checks it can reach Hermes without booting the server
-- `server/live-runs.ts` + `server/db/` — in-memory replayable event buffers for in-flight responses; SQLite for response/session metadata (transcripts are never duplicated — they're projected from the session's harness backend: Hermes' SessionDB, OpenClaw's history, ...)
+- `server/live-runs.ts` + `server/response-store.ts` — in-memory replayable event buffers for in-flight responses, and in-memory (TTL/count-bounded, lost on restart) response metadata; session metadata is never stored — session lists and transcripts project from the session's harness backend (Hermes' SessionDB, OpenClaw's history, ...)
 - `shared/types.ts` — the public API types; `test/` — the integration suite; `bruno/` — hand-poke collection (see `bruno/README.md`)
 
 ## Engineering practices

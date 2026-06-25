@@ -15,7 +15,6 @@ export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
 /** Response modes. `chat` runs one turn; `goal` is reserved for a fast-follow. */
 export const RESPONSE_MODES = ['chat', 'goal'] as const;
-export type ResponseMode = (typeof RESPONSE_MODES)[number];
 
 export const SUPPORTED_AGENTS = ['hermes', 'openclaw'] as const;
 export type AgentType = (typeof SUPPORTED_AGENTS)[number];
@@ -88,15 +87,9 @@ export interface ResponseObject {
 // Public API: sessions
 // ---------------------------------------------------------------------------
 
-/** One conversation. The gateway holds the index; the session's harness backend (Hermes, OpenClaw, ...) owns the transcript. */
-export interface SessionObject {
-  id: string;
-  agent: AgentType;
-  model: string | null;
-  provider: string | null;
-  created: number;
-  last_response_at: number | null;
-}
+// Listing a harness's sessions (`GET /v1/sessions?agent=`) passes the backend's
+// own session objects through untouched, so there is no gateway-owned session
+// type — each harness (Hermes SessionDB, ...) defines its own fields.
 
 /** A message in a session's history, projected from the session's harness backend (Hermes SessionDB, OpenClaw history, ...). */
 export interface SessionMessage {
@@ -106,10 +99,6 @@ export interface SessionMessage {
   content: string;
   thinking?: string;
   created_at: number;
-}
-
-export interface SessionWithHistory extends SessionObject {
-  history: SessionMessage[];
 }
 
 // ---------------------------------------------------------------------------

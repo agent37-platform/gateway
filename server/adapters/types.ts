@@ -56,6 +56,10 @@ export interface AgentAdapter {
   /** True when the backend is reachable and ready. */
   healthCheck(): Promise<boolean>;
 
+  /** The backend's own session list, native fields passed through untouched.
+   *  Backends without a list API return []. */
+  listSessions(): Promise<Record<string, unknown>[]>;
+
   /** Projected transcript for a session, from the backend's own store. */
   getMessages(sessionId: string): Promise<HermesMessage[]>;
 
@@ -64,6 +68,12 @@ export interface AgentAdapter {
 
   /** Best-effort delete of the backend's transcript for a session. */
   deleteSession(sessionId: string): Promise<boolean>;
+
+  /** Rename a session (set its title) in the backend's own store. Optional: a
+   *  backend implements it only when it natively stores an editable, round-
+   *  trippable title; the route answers 405 for harnesses that don't. Returns
+   *  whether a session was renamed (false when no session matched the id). */
+  renameSession?(sessionId: string, title: string): Promise<boolean>;
 
   /** Models the backend can run. */
   getModels(): Promise<AgentModelsResponse>;

@@ -4,8 +4,8 @@ import { writeStreamEvent, writeComment } from './sse.js';
 
 // In-memory registry of in-flight (and just-finished) responses. It buffers the
 // ordered SSE events for each response so a dropped client can reconnect and
-// replay everything so far, then resume live. Durable response/session metadata
-// lives in SQLite; this is the ephemeral streaming layer.
+// replay everything so far, then resume live. Response metadata lives in the
+// in-memory response-store; this is the ephemeral streaming layer.
 
 interface LiveRun {
   responseId: string;

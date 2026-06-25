@@ -1,0 +1,33 @@
+meta {
+  name: 01 Health (openclaw)
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/v1/health?agent=openclaw
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: openclaw
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("reports OpenClaw health", function () {
+    expect(res.body.ok).to.equal(true);
+    expect(res.body.agent).to.equal("openclaw");
+    expect(res.body.healthy).to.be.a("boolean");
+  });
+}
+
+docs {
+  Liveness + whether the OpenClaw harness backend is reachable, selected with
+  `?agent=openclaw`. `healthy` is false when the local OpenClaw gateway is not
+  reachable from this instance.
+}

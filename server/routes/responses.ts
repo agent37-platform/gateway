@@ -10,7 +10,7 @@ import { INSTANCE_DEFAULT_AGENT } from '../agent.js';
 import { resolveHomeAwarePath } from '../paths.js';
 import { initSSE, writeStreamEvent } from '../sse.js';
 import { attach, hasRun } from '../live-runs.js';
-import { getResponse, setResponseStatus } from '../db/queries.js';
+import { getResponse, setResponseStatus } from '../response-store.js';
 import {
   beginResponse,
   cancelResponse,
@@ -169,14 +169,9 @@ responsesRouter.post('/', async (req, res, next) => {
     if (!res.writableEnded && !res.destroyed) res.end(JSON.stringify(response));
   } catch (error) {
     // driveResponse never rejects by contract (agent failures resolve as failed
-    // responses); this is the same last resort the stream branch has. Settle the stored
-    // row too, so a later GET /v1/responses/:id agrees with the body written below.
+    // responses); this is the same last resort the stream branch has.
     console.error('driveResponse crashed:', error);
-    try {
-      setResponseStatus(begun.responseId, 'failed');
-    } catch {
-      // the row may be unreachable for the same reason driveResponse crashed
-    }
+    setResponseStatus(begun.responseId, 'failed');
     if (!res.writableEnded && !res.destroyed) {
       res.end(
         JSON.stringify({
@@ -197,13 +192,6 @@ responsesRouter.post('/', async (req, res, next) => {
   } finally {
     clearInterval(heartbeat);
   }
-});
-
-// GET /v1/responses/:id — fetch a response by id.
-responsesRouter.get('/:id', (req, res, next) => {
-  const response = getResponse(req.params.id);
-  if (!response) return next(responseNotFound(req.params.id));
-  res.json(response);
 });
 
 // GET /v1/responses/:id/stream — reconnect: replay a snapshot, then resume live.

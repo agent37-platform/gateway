@@ -19,14 +19,15 @@ tests {
     expect(res.status).to.equal(200);
   });
 
-  test("only openclaw sessions", function () {
+  test("openclaw sessions", function () {
+    expect(res.body.agent).to.equal("openclaw");
     expect(res.body.data).to.be.an("array");
-    res.body.data.forEach((s) => expect(s.agent).to.equal("openclaw"));
   });
 }
 
 docs {
-  List only the OpenClaw chat sessions on this instance via the `?agent=` filter
-  (`hermes` | `openclaw`). Newest first. Omit the filter (see "09 List Sessions")
-  to list every session. Unknown agent values return a 400 validation_error.
+  The OpenClaw chat sessions on this instance, selected with `?agent=openclaw`
+  (`hermes` | `openclaw`), projected from OpenClaw's own store as `{ agent, data }`.
+  Omitting `?agent=` falls back to the instance's default harness — not a merged
+  listing. Unknown agent values return a 400 validation_error.
 }

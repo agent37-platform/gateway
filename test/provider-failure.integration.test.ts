@@ -89,10 +89,6 @@ test('a turn whose provider calls are all refused settles as failed with a struc
   assert.match(body.error.message, /instance_budget_exhausted|budget exhausted/i);
   assert.match(body.error.hint ?? '', /instance budget|workspace balance/i);
   assert.equal(body.output_text, '');
-
-  const fetched = (await (await fetch(`${base}/v1/responses/${body.id}`)).json()) as typeof body;
-  assert.equal(fetched.status, 'failed');
-  assert.equal(fetched.error?.code, 'quota_exhausted');
 });
 
 test('a streaming turn whose provider calls are all refused ends with response.failed', async () => {

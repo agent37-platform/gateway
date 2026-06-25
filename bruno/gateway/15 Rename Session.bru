@@ -1,0 +1,40 @@
+meta {
+  name: 15 Rename Session
+  type: http
+  seq: 15
+}
+
+patch {
+  url: {{baseUrl}}/v1/sessions/{{sessionId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "title": "Renamed from Bruno"
+  }
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("renamed", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("sessionId"));
+    expect(res.body.renamed).to.equal(true);
+  });
+}
+
+docs {
+  Rename a session by writing its title straight into the harness's own store
+  (`PATCH /v1/sessions/:id`, body `{ "title": "…" }` → `{ id, agent, renamed }`).
+  Hermes only — harnesses without an editable title (OpenClaw) return
+  `405 rename_unsupported`; a duplicate title returns `409 title_conflict`.
+  Reuses the `sessionId` saved by Create Response. Pick the harness with `?agent=`.
+}

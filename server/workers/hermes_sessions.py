@@ -349,12 +349,36 @@ def project_session_metadata(session_id: Any) -> dict[str, Any]:
     }
 
 
+def list_sessions(limit: int = 100) -> dict[str, Any]:
+    """List this instance's Hermes sessions, native fields passed through.
+
+    Returns ``{"sessions": [...]}`` ordered by most-recent activity — the same
+    view Hermes itself shows (one logical conversation per entry, compression
+    chains projected to their live tip). Each entry carries Hermes' own keys
+    (id, title, model, message_count, started_at, last_active, preview, ...).
+    """
+    import hermes_worker
+
+    hermes_worker._ensure_imports()
+    if hermes_worker._SessionDB is None:
+        raise WorkerError(
+            "Hermes session database is unavailable.",
+            code="session_db_unavailable",
+        )
+    db = hermes_worker._SessionDB()
+    try:
+        sessions = db.list_sessions_rich(limit=limit, order_by_last_active=True)
+    except Exception as exc:
+        raise WorkerError(f"Could not list Hermes sessions: {exc}", code="session_load_error") from exc
+    return {"sessions": list(sessions)}
+
+
 def delete_session(session_id: Any) -> dict[str, Any]:
     """Best-effort delete of a Hermes session and its compression lineage.
 
-    The gateway owns its own session index (SQLite); this removes the underlying
-    Hermes transcript when the SessionDB exposes a delete method. A missing
-    session, or a SessionDB build without a delete method, resolves to
+    Removes the underlying Hermes transcript when the SessionDB exposes a delete
+    method (the gateway keeps no session index of its own). A missing session, or
+    a SessionDB build without a delete method, resolves to
     ``{"deleted": False}`` rather than raising, so DELETE stays idempotent.
     """
     session_id = string_or_none(session_id)
@@ -374,3 +398,32 @@ def delete_session(session_id: Any) -> dict[str, Any]:
                     pass
                 break
     return {"deleted": deleted_any}
+
+
+def set_session_title(session_id: Any, title: Any) -> dict[str, Any]:
+    """Rename a session by writing its title straight into Hermes' SessionDB.
+
+    Titles the live tip of a compression lineage (the id ``list_sessions_rich``
+    surfaces), so the rename shows up in the session list and round-trips through
+    the GET read paths. Hermes enforces a unique, length-capped, sanitized title;
+    a collision or over-long title surfaces as a typed WorkerError, not a crash.
+    Returns ``{"renamed": bool}`` — False when no session matched the id, the same
+    harness-owns-existence grain as delete.
+    """
+    session_id = string_or_none(session_id)
+    if not session_id:
+        raise WorkerError("Session ID is required.", code="bad_request")
+    if not isinstance(title, str):
+        raise WorkerError("Title is required.", code="bad_request")
+
+    session_db, live_session_id = open_session(session_id, resolve_live=True)
+    try:
+        renamed = session_db.set_session_title(live_session_id, title)
+    except ValueError as exc:
+        # Hermes raises ValueError both for a duplicate title (unique constraint)
+        # and an over-long one. The former is a 409 conflict; the latter a 400.
+        code = "title_conflict" if "already in use" in str(exc) else "bad_request"
+        raise WorkerError(str(exc), code=code) from exc
+    except Exception as exc:
+        raise WorkerError(f"Could not rename Hermes session: {exc}", code="session_load_error") from exc
+    return {"renamed": renamed}

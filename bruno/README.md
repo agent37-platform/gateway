@@ -9,7 +9,7 @@ API requests for poking the gateway locally, using [Bruno](https://www.usebruno.
 3. Pick the **local** environment (top-right). It sets `baseUrl` to `http://localhost:3737`.
 4. Run the requests in order. They chain through env vars:
    - **04 Create Response** saves `session_id` and `responseId`.
-   - **05 Continue Session**, **06 Get Response**, **10 Get Session**, **11 Cancel**, **12 Delete** reuse them.
+   - **05 Continue Session**, **10 Get Session**, **11 Cancel**, **12 Delete**, **15 Rename Session** reuse them.
    - **13 Upload File** saves `uploadedFilePath` (pick any local file for its
      `file` field first), which **14 Download File** reuses.
 

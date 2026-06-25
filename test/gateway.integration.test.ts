@@ -1,7 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { setTimeout as delay } from 'node:timers/promises';
 import { dirname, join } from 'node:path';
 import { parse } from 'dotenv';
 import { startTestServer, postJson, SseReader, type TestServer } from './test-helpers.js';
@@ -56,17 +55,14 @@ function assertCompleted(body: ResponseBody): void {
   assert.ok(body.usage);
 }
 
-async function waitForTerminalResponse(responseId: string): Promise<ResponseBody> {
-  for (let i = 0; i < 120; i += 1) {
-    const body = await jsonOk<ResponseBody>(await fetch(`${base}/v1/responses/${responseId}`));
-    if (body.status !== 'in_progress') return body;
-    await delay(500);
-  }
-  throw new Error(`response ${responseId} stayed in_progress`);
-}
-
 test('health, version, and models endpoints answer from the real gateway', async () => {
   assert.deepEqual(await jsonOk(await fetch(`${base}/v1/health`)), {
+    ok: true,
+    agent: 'hermes',
+    healthy: true,
+    hermes: true,
+  });
+  assert.deepEqual(await jsonOk(await fetch(`${base}/v1/health?agent=hermes`)), {
     ok: true,
     agent: 'hermes',
     healthy: true,
@@ -108,18 +104,20 @@ test('responses and sessions work end-to-end through the local LLM', async () =>
   assertCompleted(created);
   assert.equal(created.metadata?.marker, marker);
 
-  const fetched = await jsonOk<ResponseBody>(await fetch(`${base}/v1/responses/${created.id}`));
-  assert.equal(fetched.output_text, created.output_text);
-
-  const sessions = await jsonOk<{ data: Array<{ id: string }> }>(await fetch(`${base}/v1/sessions`));
+  // GET /v1/sessions lists straight from the harness, native fields untouched;
+  // the chosen agent is echoed at the top level. `?agent=` selects the harness
+  // (default hermes); an unknown agent is a 400.
+  const sessions = await jsonOk<{ agent: string; data: Array<{ id: string }> }>(
+    await fetch(`${base}/v1/sessions`),
+  );
+  assert.equal(sessions.agent, 'hermes');
   assert.ok(sessions.data.some((session) => session.id === created.session_id));
 
-  // The optional ?agent= filter narrows the list to one agent; an unknown agent is a 400.
-  const hermesSessions = await jsonOk<{ data: Array<{ id: string; agent: string }> }>(
+  const hermesSessions = await jsonOk<{ agent: string; data: Array<{ id: string }> }>(
     await fetch(`${base}/v1/sessions?agent=hermes`),
   );
+  assert.equal(hermesSessions.agent, 'hermes');
   assert.ok(hermesSessions.data.some((session) => session.id === created.session_id));
-  assert.ok(hermesSessions.data.every((session) => session.agent === 'hermes'));
 
   const badFilter = await fetch(`${base}/v1/sessions?agent=bogus`);
   assert.equal(badFilter.status, 400);
@@ -145,12 +143,43 @@ test('responses and sessions work end-to-end through the local LLM', async () =>
   assertCompleted(continued);
   assert.equal(continued.session_id, created.session_id);
 
+  // Rename writes the title straight into Hermes' SessionDB; it round-trips
+  // through the native `title` field the session list passes through — no
+  // gateway-side store involved.
+  const renameTitle = `renamed-${marker}`;
+  const renamed = await jsonOk<{ id: string; agent: string; renamed: boolean }>(
+    await fetch(`${base}/v1/sessions/${created.session_id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: renameTitle }),
+    }),
+  );
+  assert.deepEqual(renamed, { id: created.session_id, agent: 'hermes', renamed: true });
+
+  const titled = await jsonOk<{ data: Array<{ id: string; title?: string }> }>(
+    await fetch(`${base}/v1/sessions?agent=hermes`),
+  );
+  assert.equal(titled.data.find((session) => session.id === created.session_id)?.title, renameTitle);
+
+  // An empty/whitespace title is rejected before it reaches the worker.
+  const badRename = await fetch(`${base}/v1/sessions/${created.session_id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '   ' }),
+  });
+  assert.equal(badRename.status, 400);
+  assert.equal(((await badRename.json()) as { error: { param: string } }).error.param, 'title');
+
   const deleted = await jsonOk<{ id: string; deleted: boolean }>(
     await fetch(`${base}/v1/sessions/${created.session_id}`, { method: 'DELETE' }),
   );
   assert.deepEqual(deleted, { id: created.session_id, deleted: true });
-  assert.equal((await fetch(`${base}/v1/sessions/${created.session_id}`)).status, 404);
-  assert.equal((await fetch(`${base}/v1/responses/${created.id}`)).status, 404);
+
+  // After deletion the harness has no transcript, so history projects empty.
+  const gone = await jsonOk<{ history: unknown[] }>(
+    await fetch(`${base}/v1/sessions/${created.session_id}`),
+  );
+  assert.deepEqual(gone.history, []);
 });
 
 test('streaming responses can be replayed', async () => {
@@ -168,7 +197,6 @@ test('streaming responses can be replayed', async () => {
   assert.ok(events.some((event) => event.event === 'response.output_text.delta'));
 
   const responseId = events[0].data.id as string;
-  assertCompleted(await jsonOk<ResponseBody>(await fetch(`${base}/v1/responses/${responseId}`)));
 
   const replay = await fetch(`${base}/v1/responses/${responseId}/stream`);
   assert.equal(replay.status, 200);
@@ -198,8 +226,17 @@ test('an in-flight response blocks another turn and can be cancelled', async () 
 
   const cancel = await fetch(`${base}/v1/responses/${responseId}/cancel`, { method: 'POST' });
   assert.equal(cancel.status, 200);
-  await reader.drain();
-  assert.equal((await waitForTerminalResponse(responseId)).status, 'cancelled');
+  await reader.drain(); // the in-flight stream ends once the turn is cancelled
+
+  // Reconnecting replays the now-terminal turn and closes immediately.
+  const replay = await new SseReader(
+    await fetch(`${base}/v1/responses/${responseId}/stream`),
+  ).drain();
+  assert.equal(replay.at(-1)?.event, 'response.completed');
+
+  // The session lock is released, so a new turn on it is no longer rejected.
+  const next = await postJson(base, { session_id: sessionId, input: 'ok', reasoning_effort: 'low' });
+  assert.equal(next.status, 200);
 });
 
 test('a file can be uploaded, attached to a turn, and downloaded back', async () => {
@@ -302,12 +339,33 @@ test('openclaw responses complete, stream, and stay on one session', { skip: ope
   assert.equal(recalled.session_id, created.session_id);
   assert.ok(recalled.output_text.includes(marker));
 
-  // History reads back through OpenClaw's GET /sessions/{key}/history.
+  // History reads back through OpenClaw's GET /sessions/{key}/history. The
+  // session lives on OpenClaw, so the read must name `?agent=openclaw` — the
+  // gateway keeps no index to infer it from.
   const session = await jsonOk<{ history: { role: string; content: string }[] }>(
-    await fetch(`${base}/v1/sessions/${created.session_id}`),
+    await fetch(`${base}/v1/sessions/${created.session_id}?agent=openclaw`),
   );
   assert.ok(session.history.some((m) => m.role === 'user' && m.content.includes(marker)));
   assert.ok(session.history.some((m) => m.role === 'assistant' && m.content.includes(marker)));
+
+  // OpenClaw has no list API over HTTP, so the adapter shells out to the
+  // `openclaw` CLI and surfaces each `openresponses-user:{user}` session under
+  // the `id` it reads back with — so the created session shows up here.
+  const list = await jsonOk<{ agent: string; data: Array<{ id: string }> }>(
+    await fetch(`${base}/v1/sessions?agent=openclaw`),
+  );
+  assert.equal(list.agent, 'openclaw');
+  assert.ok(list.data.some((s) => s.id === created.session_id));
+
+  // OpenClaw stores no round-trippable session title, so rename is a 405 rather
+  // than a gateway-side name the read paths couldn't surface.
+  const rename = await fetch(`${base}/v1/sessions/${created.session_id}?agent=openclaw`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'nope' }),
+  });
+  assert.equal(rename.status, 405);
+  assert.equal(((await rename.json()) as { error: { code: string } }).error.code, 'rename_unsupported');
 
   const stream = await postJson(base, {
     agent: 'openclaw',
@@ -335,8 +393,13 @@ test('an in-flight openclaw turn can be cancelled', { skip: openclawSkip }, asyn
 
   const cancel = await fetch(`${base}/v1/responses/${responseId}/cancel`, { method: 'POST' });
   assert.equal(cancel.status, 200);
-  await reader.drain();
-  assert.equal((await waitForTerminalResponse(responseId)).status, 'cancelled');
+  await reader.drain(); // the in-flight stream ends once the turn is cancelled
+
+  // Reconnecting replays the now-terminal turn and closes immediately.
+  const replay = await new SseReader(
+    await fetch(`${base}/v1/responses/${responseId}/stream`),
+  ).drain();
+  assert.equal(replay.at(-1)?.event, 'response.completed');
 });
 
 test('validation and not-found errors stay stable', async () => {
@@ -348,13 +411,19 @@ test('validation and not-found errors stay stable', async () => {
   assert.equal(goal.status, 400);
   assert.equal((await goal.json()).error.param, 'mode');
 
-  const response = await fetch(`${base}/v1/responses/missing`);
+  const badHealthAgent = await fetch(`${base}/v1/health?agent=bogus`);
+  assert.equal(badHealthAgent.status, 400);
+  assert.equal((await badHealthAgent.json()).error.param, 'agent');
+
+  // GET /v1/responses/:id was removed; the stream endpoint still 404s a missing id.
+  const response = await fetch(`${base}/v1/responses/missing/stream`);
   assert.equal(response.status, 404);
   assert.equal((await response.json()).error.code, 'response_not_found');
 
-  const session = await fetch(`${base}/v1/sessions/missing`);
-  assert.equal(session.status, 404);
-  assert.equal((await session.json()).error.code, 'session_not_found');
+  // Sessions project from the harness, which owns existence: an unknown id
+  // returns empty history rather than a 404.
+  const session = await jsonOk<{ history: unknown[] }>(await fetch(`${base}/v1/sessions/missing`));
+  assert.deepEqual(session.history, []);
 
   const route = await fetch(`${base}/v1/nope`);
   assert.equal(route.status, 404);

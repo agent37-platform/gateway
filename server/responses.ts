@@ -1,10 +1,10 @@
 // Turn orchestration: the glue between an incoming request, the agent adapter,
-// the live SSE registry, and the SQLite metadata store.
+// the live SSE registry, and the in-memory response store.
 //
-//   beginResponse  — synchronously validate, create/continue a session, insert
-//                    the response row, register the live run, emit created.
+//   beginResponse  — synchronously validate, register the response, register the
+//                    live run, emit created. The harness owns the session id.
 //   driveResponse  — async: consume the agent stream, emit documented SSE
-//                    events, accumulate, then persist the terminal state.
+//                    events, accumulate, then record the terminal state.
 
 import type { AgentRunSettings, StreamEvent } from './adapters/types.js';
 import type {
@@ -26,19 +26,13 @@ import {
 import {
   finalizeResponse,
   getResponse,
-  getSession,
   insertResponse,
-  insertSession,
-  markSessionResponded,
-  setResponseStatus,
-  setSessionModel,
-} from './db/queries.js';
+} from './response-store.js';
 import {
   apiErrorFromStreamEvent,
   apiErrorFromUnknown,
   responseNotFound,
   sessionBusy,
-  sessionNotFound,
 } from './errors.js';
 import { newResponseId, newSessionId } from './ids.js';
 
@@ -62,32 +56,17 @@ export interface BegunResponse {
 }
 
 /**
- * Validate the request, resolve (or create) the session, persist an
- * in_progress response row, and register the live run. Synchronous so the
- * one-active-turn-per-session check is atomic. Throws GatewayError.
+ * Validate the request, register the in-memory response, and start the live
+ * run. The session id is a stateless handle the harness owns (create-on-first-
+ * use); the caller names the harness via `agent` on every turn, so there is no
+ * gateway-side session index. Synchronous so the one-active-turn-per-session
+ * check is atomic. Throws GatewayError.
  */
 export function beginResponse(req: ResponseRequest): BegunResponse {
-  let session = req.sessionId ? getSession(req.sessionId) : undefined;
-  if (req.sessionId && !session) throw sessionNotFound(req.sessionId);
-
-  const sessionId = session?.id ?? newSessionId();
-  // On a continuation the backend is fixed by the session, not the request: routing on
-  // req.agent would let an omitted or mismatched agent silently hit the wrong worker. Cancel
-  // and the sessions route already key off the stored agent — this makes the turn path agree.
-  const agent = session ? session.agent : req.agent;
+  const sessionId = req.sessionId ?? newSessionId();
+  const agent = req.agent;
 
   if (activeResponseForSession(sessionId)) throw sessionBusy();
-
-  if (!session) {
-    session = insertSession({
-      id: sessionId,
-      agent: req.agent,
-      model: req.model,
-      provider: req.provider,
-    });
-  } else if (req.model !== null || req.provider !== null) {
-    setSessionModel(sessionId, req.model ?? session.model, req.provider ?? session.provider);
-  }
 
   const responseId = newResponseId();
   insertResponse({
@@ -173,7 +152,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
   } catch (error) {
     sawTerminal = true;
     status = 'failed';
-    apiError = apiErrorFromUnknown(error, 'Agent chat stream failed');
+    apiError = apiErrorFromUnknown(error, 'Agent chat stream failed', agent);
   }
 
   // A stream that ended without an explicit terminal event: treat what we have
@@ -186,22 +165,10 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
     emit(responseId, { event: 'response.completed', data: { output_text: outputText, usage } });
   }
 
-  // Persist the terminal state, but ALWAYS release the session and end live
-  // subscribers (markFinished) even if the DB write fails — otherwise a failed
-  // write would leave the session locked and the row stuck at in_progress.
-  try {
-    finalizeResponse(responseId, { status, output_text: outputText, usage, error: apiError, model, provider });
-    if (status !== 'failed') markSessionResponded(sessionId);
-  } catch (persistError) {
-    console.error(`Failed to persist response ${responseId}:`, persistError);
-    try {
-      setResponseStatus(responseId, status);
-    } catch {
-      // Last resort: the row may remain in_progress, but the session is freed below.
-    }
-  } finally {
-    markFinished(responseId, status);
-  }
+  // Record the terminal state, then release the session lock and end live
+  // subscribers. The response store is an in-memory map, so neither call throws.
+  finalizeResponse(responseId, { status, output_text: outputText, usage, error: apiError, model, provider });
+  markFinished(responseId, status);
 
   return (
     getResponse(responseId) ?? {

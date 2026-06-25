@@ -486,6 +486,13 @@ export class HermesWorkerAdapter implements AgentAdapter, GoalCapableAdapter {
     }
   }
 
+  async listSessions(): Promise<Record<string, unknown>[]> {
+    const result = await this.client.request<{ sessions: Record<string, unknown>[] }>({
+      type: 'sessions.list',
+    });
+    return result.sessions;
+  }
+
   async getMessages(sessionId: string): Promise<HermesMessage[]> {
     const result = await this.client.request<{ messages: HermesMessage[] }>({
       type: 'session.messages.get',
@@ -509,6 +516,15 @@ export class HermesWorkerAdapter implements AgentAdapter, GoalCapableAdapter {
       sessionId,
     });
     return result.deleted;
+  }
+
+  async renameSession(sessionId: string, title: string): Promise<boolean> {
+    const result = await this.client.request<{ renamed: boolean }>({
+      type: 'session.set_title',
+      sessionId,
+      title,
+    });
+    return result.renamed;
   }
 
   async getModels(): Promise<AgentModelsResponse> {

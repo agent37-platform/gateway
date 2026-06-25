@@ -35,10 +35,12 @@ from hermes_worker_utils import (
 )
 from hermes_sessions import (
     delete_session,
+    list_sessions,
     load_agent_history,
     open_session,
     project_session_messages,
     project_session_metadata,
+    set_session_title,
 )
 
 PROTOCOL_OUT = sys.stdout
@@ -1340,6 +1342,34 @@ def _run_chat(request_id: str, request: dict[str, Any]) -> None:
     if result.get("last_reasoning") and not state["thinking"]:
         _send({"id": request_id, "type": "thinking_delta", "content": str(result["last_reasoning"])})
 
+    # Auto-generate a session title after the first exchange, the same way
+    # Hermes' own front-ends (CLI/TUI/ACP) do — fire-and-forget on a background
+    # thread, so it never blocks the turn. `maybe_auto_title` no-ops once a title
+    # exists or past the first couple of exchanges. `main_runtime` reuses the
+    # turn's provider (which just succeeded) so titling hits a funded model
+    # rather than relying on the "auto" auxiliary provider.
+    if final_text and not result.get("failed") and not result.get("partial"):
+        try:
+            from agent.title_generator import maybe_auto_title
+
+            maybe_auto_title(
+                session_db,
+                session_id,
+                message,
+                final_text,
+                history,
+                main_runtime={
+                    "model": getattr(agent, "model", None),
+                    "provider": getattr(agent, "provider", None),
+                    "base_url": getattr(agent, "base_url", None),
+                    "api_key": getattr(agent, "api_key", None),
+                    "api_mode": getattr(agent, "api_mode", None),
+                },
+            )
+        except Exception:
+            # Titling is best-effort; never fail a turn over it.
+            pass
+
     context_engine = getattr(agent, "context_compressor", None)
     context_used = int(result.get("last_prompt_tokens") or 0)
     context_window = int(getattr(context_engine, "context_length", 0) or 0)
@@ -1459,12 +1489,16 @@ def _handle_request(request: dict[str, Any]) -> None:
             _result(request_id, _set_defaults(request))
         elif request_type == "models.list":
             _result(request_id, _list_models())
+        elif request_type == "sessions.list":
+            _result(request_id, list_sessions())
         elif request_type == "session.messages.get":
             _result(request_id, project_session_messages(request.get("sessionId"), request.get("taskId")))
         elif request_type == "session.get":
             _result(request_id, project_session_metadata(request.get("sessionId")))
         elif request_type == "session.delete":
             _result(request_id, delete_session(request.get("sessionId")))
+        elif request_type == "session.set_title":
+            _result(request_id, set_session_title(request.get("sessionId"), request.get("title")))
         elif request_type == "goal.status":
             _result(request_id, _goal_status(request))
         elif request_type == "goal.set":

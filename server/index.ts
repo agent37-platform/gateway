@@ -1,10 +1,13 @@
 import 'dotenv/config';
 import './logging.js';
-import './db/index.js';
 import { createServer, type Server } from 'node:http';
 import app from './app.js';
 import { adapter } from './agent.js';
 import { shutdownLiveRuns } from './live-runs.js';
+import { shutdownResponseStore } from './response-store.js';
+import { ensureGatewayStateDirs } from './paths.js';
+
+ensureGatewayStateDirs();
 
 const PORT = parseInt(process.env.PORT || '3737', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -87,6 +90,7 @@ async function shutdown(reason: ShutdownReason, exitCode = 0): Promise<void> {
   forceExit.unref();
 
   shutdownLiveRuns();
+  shutdownResponseStore();
   const results = await Promise.allSettled([closeHttpServer(), adapter.stop?.() ?? Promise.resolve()]);
   for (const result of results) {
     if (result.status === 'rejected') console.error(result.reason);

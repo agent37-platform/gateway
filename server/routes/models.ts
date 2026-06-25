@@ -1,8 +1,7 @@
 import { Router } from 'express';
-import type { ModelInfo, ModelsListResponse } from '../../shared/types.js';
-import { SUPPORTED_AGENTS } from '../../shared/types.js';
-import { getAdapter, INSTANCE_DEFAULT_AGENT } from '../agent.js';
-import { gatewayErrorFromWorker, optionalEnum, queryParam } from '../errors.js';
+import type { AgentType, ModelInfo, ModelsListResponse } from '../../shared/types.js';
+import { getAdapter, agentFromQuery } from '../agent.js';
+import { gatewayErrorFromWorker } from '../errors.js';
 
 export const modelsRouter = Router();
 
@@ -17,9 +16,10 @@ const MODEL_CREATED = 0;
 // = the gateway's configured default), and the response echoes which `agent`
 // answered.
 modelsRouter.get('/', async (req, res, next) => {
+  let agent: AgentType | undefined;
   try {
     // `?agent=` (omitted or empty) falls back to the configured default harness.
-    const agent = optionalEnum(queryParam(req.query.agent), 'agent', SUPPORTED_AGENTS, INSTANCE_DEFAULT_AGENT);
+    agent = agentFromQuery(req.query.agent);
     const models = await getAdapter(agent).getModels();
     const data: ModelInfo[] = [];
     for (const group of models.groups) {
@@ -44,6 +44,6 @@ modelsRouter.get('/', async (req, res, next) => {
     };
     res.json(body);
   } catch (error) {
-    next(gatewayErrorFromWorker(error, 'Could not list models'));
+    next(gatewayErrorFromWorker(error, 'Could not list models', agent));
   }
 });

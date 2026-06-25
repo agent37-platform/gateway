@@ -15,9 +15,11 @@ export type WorkerRequest =
   | { id: string; type: 'settings.get' }
   | { id: string; type: 'settings.set'; provider?: string | null; model?: string | null; reasoningEffort?: string | null }
   | { id: string; type: 'models.list' }
+  | { id: string; type: 'sessions.list' }
   | { id: string; type: 'session.messages.get'; sessionId: string; taskId?: string }
   | { id: string; type: 'session.get'; sessionId: string }
   | { id: string; type: 'session.delete'; sessionId: string }
+  | { id: string; type: 'session.set_title'; sessionId: string; title: string }
   | { id: string; type: 'goal.status'; sessionId: string }
   | { id: string; type: 'goal.set'; sessionId: string; goal: string; maxTurns?: number | null }
   | { id: string; type: 'goal.pause'; sessionId: string; reason?: string }
@@ -46,9 +48,11 @@ export type WorkerResult =
   | { ok: boolean; agentDir?: string | null; python?: string | null }
   | AgentDefaults
   | AgentModelsResponse
+  | { sessions: Record<string, unknown>[] }
   | { messages: HermesMessage[] }
   | { session: SessionMetadata | null }
   | { deleted: boolean }
+  | { renamed: boolean }
   | { goal: GoalStateSnapshot | null }
   | { cleared: boolean }
   | { interrupted: boolean }

@@ -38,10 +38,12 @@ State is split deliberately:
 
 - **In-memory live registry** buffers the SSE events of each in-flight (and
   just-finished) response, so a dropped client can reconnect and replay.
-- **SQLite** (`<home>/data/gateway.db`) holds response and session **metadata**
-  — enough to fetch a response by id or list sessions after a restart.
-- **Transcript history** is never duplicated; it's projected on demand from
-  Hermes' `SessionDB`.
+- **In-memory response store** holds each turn's receipt (status, usage, error,
+  echoed metadata), bounded by a TTL and a count cap and lost on restart — just
+  enough to replay a dropped stream after its live buffer expires.
+- **Transcript history and the session list** are never duplicated; they're
+  projected on demand from the session's harness backend (Hermes' `SessionDB`,
+  OpenClaw's history, …). The gateway keeps no session index.
 
 ## How it talks to OpenClaw
 
@@ -54,10 +56,12 @@ Session history reads through OpenClaw's `GET /sessions/{key}/history`, where th
 key is `openresponses-user:{user}` — OpenClaw stores each turn under the `user`
 we send (the gateway session id) and resolves that partial key to the full
 session. `GET /v1/sessions/{id}` projects that transcript. OpenClaw exposes no
-HTTP route to delete a stored transcript, so `DELETE /v1/sessions/{id}` drops the
-gateway's own records while OpenClaw keeps its copy; likewise there is no cancel
-API, so cancel aborts the gateway-side stream only (OpenClaw may keep working
-server-side).
+HTTP route to delete a stored transcript, so `DELETE /v1/sessions/{id}` reports
+`deleted: false` and OpenClaw keeps its copy; likewise there is no cancel API, so
+cancel aborts the gateway-side stream only (OpenClaw may keep working
+server-side). It also has no round-trippable session title, so
+`PATCH /v1/sessions/{id}` (rename) answers `405 rename_unsupported` rather than
+keeping a gateway-side name the read paths couldn't surface.
 
 ### Set up OpenClaw
 
@@ -181,7 +185,6 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 
 | Action | Endpoint |
 | --- | --- |
-| Fetch by id | `GET /v1/responses/{id}` |
 | Reconnect a dropped stream | `GET /v1/responses/{id}/stream` (replays a snapshot, then resumes live) |
 | Cancel a running turn | `POST /v1/responses/{id}/cancel` |
 
@@ -189,8 +192,9 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 
 | Action | Endpoint |
 | --- | --- |
-| List | `GET /v1/sessions` → `{ data: [...] }` (filter with `?agent=hermes\|openclaw`) |
-| Retrieve, with history | `GET /v1/sessions/{id}` |
+| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw`; native backend fields pass through) |
+| Retrieve, with history | `GET /v1/sessions/{id}` (`?agent=` to pick the harness) |
+| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store. Hermes only (titles are length-capped and must be unique — a clash is `409 title_conflict`); harnesses without an editable title answer `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |
 
 ### Files
@@ -227,10 +231,12 @@ stays stable.
 | Action | Endpoint |
 | --- | --- |
 | Models a harness can run | `GET /v1/models` (configured default; add `?agent=hermes\|openclaw` to target one) |
-| Liveness + default-backend reachability | `GET /v1/health` |
+| Liveness + harness reachability | `GET /v1/health` (configured default; add `?agent=hermes\|openclaw` to target one) |
 | Version | `GET /v1/version` |
 
-`GET /v1/health` reports on the gateway's configured default harness.
+`GET /v1/health` reports on the gateway's configured default harness, or the
+one named by an optional `?agent=` query param. It returns `{ ok, agent,
+healthy }`, plus a legacy `hermes` field when Hermes is probed.
 
 `GET /v1/models` returns the OpenAI list shape, so any OpenAI-compatible client
 works. It lists the models of one harness — the configured default, or the one
@@ -271,14 +277,16 @@ Every error returns a stable, machine-readable body. Branch on `code`, show
 | Code | HTTP | When |
 | --- | --- | --- |
 | `validation_error` | 400 | A request field was invalid (see `param`). |
-| `session_not_found` | 404 | No session with that id. |
 | `response_not_found` | 404 | No response with that id. |
 | `file_not_found` | 404 | No file at that path. |
 | `not_found` | 404 | Unknown route. |
 | `session_busy` | 409 | A response is already running on the session. |
+| `title_conflict` | 409 | The requested session title is already in use by another session. |
+| `rename_unsupported` | 405 | The targeted harness can't rename sessions (no native editable title). |
 | `payload_too_large` | 413 | Request body exceeded the size limit. |
 | `rate_limited` | 429 | The upstream agent/provider was rate-limited. |
 | `agent_error` | 502 | The agent backend failed (auth, model, provider, etc.). |
+| `agent_unavailable` | 503 | The targeted harness backend isn't available on this instance — never provisioned here, or down. |
 | `internal_error` | 500 | An unexpected gateway error. |
 
 Agent/worker failures surface their own `code` and `hint` where available (e.g.
@@ -293,7 +301,7 @@ npm test          # integration suite against the real local Hermes worker/LLM
 
 `npm test` drives the real Express app over HTTP/SSE against a throwaway gateway
 state dir. Response tests call the local Hermes worker and configured LLM; the
-suite also covers replay, `session_busy`, cancel, persistence, history, and
+suite also covers replay, `session_busy`, cancel, history, and
 error bodies. The OpenClaw tests run against a local OpenClaw gateway and are
 skipped automatically when none is running.
 
@@ -303,7 +311,7 @@ A [Bruno](https://www.usebruno.com/) collection lives in [`bruno/`](bruno/) —
 open that folder in Bruno, pick the **local** environment (`baseUrl`
 `http://localhost:3737`), and run the requests top to bottom. *Create Response*
 saves the `session_id` and response id into the environment, so *Continue
-Session*, *Get Response*, *Cancel*, and *Delete Session* just work. The
+Session*, *Cancel*, and *Delete Session* just work. The
 *(openclaw)* requests do the same for OpenClaw (start `openclaw` locally first).
 For *Upload File*, pick any local file first; it saves the uploaded path for
 *Download File*.

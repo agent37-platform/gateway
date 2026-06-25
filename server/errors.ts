@@ -60,10 +60,6 @@ export function queryParam(value: unknown): unknown {
   return value === '' ? undefined : value;
 }
 
-export function sessionNotFound(id: string): GatewayError {
-  return new GatewayError(404, 'session_not_found', `No session with id '${id}'.`);
-}
-
 export function responseNotFound(id: string): GatewayError {
   return new GatewayError(404, 'response_not_found', `No response with id '${id}'.`);
 }
@@ -75,6 +71,12 @@ export function fileNotFound(path: string): GatewayError {
 export function sessionBusy(): GatewayError {
   return new GatewayError(409, 'session_busy', 'A response is already running on this session.', {
     hint: 'Cancel the running response, or start another session.',
+  });
+}
+
+export function renameUnsupported(agent: string): GatewayError {
+  return new GatewayError(405, 'rename_unsupported', `The '${agent}' harness does not support renaming sessions.`, {
+    hint: 'Rename is only available on harnesses that natively store an editable session title.',
   });
 }
 
@@ -103,6 +105,7 @@ export function errorCode(error: unknown): string | undefined {
 const WORKER_CODE_MAP: Record<string, { status: number; apiCode: string }> = {
   bad_request: { status: 400, apiCode: 'validation_error' },
   task_busy: { status: 409, apiCode: 'session_busy' },
+  title_conflict: { status: 409, apiCode: 'title_conflict' },
   rate_limit: { status: 429, apiCode: 'rate_limited' },
   hermes_not_found: { status: 503, apiCode: 'hermes_not_found' },
   import_error: { status: 503, apiCode: 'import_error' },
@@ -121,12 +124,45 @@ function apiCodeForWorkerCode(code: string | undefined): string {
   return WORKER_CODE_MAP[code]?.apiCode ?? code;
 }
 
+// Connection-level syscall codes that mean "this harness's backend isn't
+// there" — whether it was never provisioned on this instance or is simply down.
+// We don't distinguish the two: the caller's fix is the same either way.
+const UNREACHABLE_SYSCALLS = new Set([
+  'ECONNREFUSED', 'ENOENT', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT',
+]);
+
+/** True when an error (or its `cause` — Node's fetch nests the system error
+ *  there) is a connection-level failure to reach a harness backend. */
+function isBackendUnreachable(error: unknown): boolean {
+  for (const e of [error, (error as { cause?: unknown })?.cause]) {
+    const code = (e as { code?: unknown })?.code;
+    if (typeof code === 'string' && UNREACHABLE_SYSCALLS.has(code)) return true;
+  }
+  return false;
+}
+
+/** The uniform "harness not available on this instance" body, or null when the
+ *  error isn't a backend-unreachable failure. A turn targeting an unprovisioned
+ *  (or down) harness fails here rather than leaking a raw `ECONNREFUSED`/`ENOENT`. */
+function agentUnavailableError(error: unknown, agent?: string): ApiError | null {
+  if (!isBackendUnreachable(error)) return null;
+  const who = agent ? `The '${agent}' harness` : 'The requested harness';
+  return {
+    code: 'agent_unavailable',
+    message: `${who} is not available on this instance.`,
+    hint: `Check that ${agent ? `'${agent}'` : 'it'} is provisioned and running here, or target a harness this instance serves.`,
+  };
+}
+
 /**
  * Convert an error thrown by the adapter/worker into a GatewayError suitable
  * for an HTTP response (used by non-streaming calls: models, session reads).
+ * Pass `agent` so an unreachable backend names the harness it couldn't reach.
  */
-export function gatewayErrorFromWorker(error: unknown, fallback = 'Agent request failed'): GatewayError {
+export function gatewayErrorFromWorker(error: unknown, fallback = 'Agent request failed', agent?: string): GatewayError {
   if (error instanceof GatewayError) return error;
+  const unavailable = agentUnavailableError(error, agent);
+  if (unavailable) return new GatewayError(503, unavailable.code, unavailable.message, { hint: unavailable.hint });
   const code = errorCode(error);
   const message = toErrorMessage(error, fallback);
   const hint = error instanceof Error ? (error as Error & { hint?: string }).hint : undefined;
@@ -148,12 +184,15 @@ export function apiErrorFromStreamEvent(
   return apiError;
 }
 
-/** Build the streamed `response.failed` error body from any caught error. */
-export function apiErrorFromUnknown(error: unknown, fallback = 'The turn ended on an error.'): ApiError {
+/** Build the streamed `response.failed` error body from any caught error.
+ *  Pass `agent` so an unreachable backend names the harness in the failure. */
+export function apiErrorFromUnknown(error: unknown, fallback = 'The turn ended on an error.', agent?: string): ApiError {
   if (error instanceof GatewayError) {
     const body = error.toBody().error;
     return body;
   }
+  const unavailable = agentUnavailableError(error, agent);
+  if (unavailable) return unavailable;
   const code = errorCode(error);
   const hint = error instanceof Error ? (error as Error & { hint?: string }).hint : undefined;
   const apiError: ApiError = {
