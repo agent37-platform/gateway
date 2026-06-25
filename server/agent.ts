@@ -17,10 +17,12 @@ export function getAdapter(agent: AgentType): GatewayAdapter {
   return registry[agent];
 }
 
-// One gateway serves one agent backend per instance. The image sets
-// GATEWAY_DEFAULT_AGENT to what it bakes (the OpenClaw image sets "openclaw"), so
-// turns that omit `agent` and the agent-agnostic routes (health, models) all hit
-// the right backend. Resolved once at load.
+// The DEFAULT harness for requests that omit `agent`. GATEWAY_DEFAULT_AGENT names
+// it (the OpenClaw image sets "openclaw"); a request can still target any registered
+// harness explicitly — via `agent` in the POST /v1/responses body, or `?agent=` on
+// GET /v1/models and /v1/sessions. This is the default only, not a one-backend limit,
+// though a request targeting a harness whose backend isn't provisioned in this
+// container fails at request time. Resolved once at load.
 export const INSTANCE_DEFAULT_AGENT: AgentType = resolveConfiguredDefaultAgent(process.env.GATEWAY_DEFAULT_AGENT);
 
 export function getDefaultAdapter(): GatewayAdapter {

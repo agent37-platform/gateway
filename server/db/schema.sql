@@ -1,5 +1,6 @@
--- Gateway metadata only. Transcript history lives in Hermes' SessionDB and is
--- projected on demand; we never duplicate messages here.
+-- Gateway metadata only. Transcript history lives in the session's harness
+-- backend (Hermes' SessionDB, OpenClaw's history, ...) and is projected on
+-- demand; we never duplicate messages here.
 
 CREATE TABLE IF NOT EXISTS sessions (
   id                TEXT PRIMARY KEY,

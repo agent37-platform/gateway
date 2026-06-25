@@ -208,7 +208,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
       id: responseId,
       session_id: sessionId,
       status,
-      agent: 'hermes',
+      agent,
       model,
       provider,
       output_text: outputText,

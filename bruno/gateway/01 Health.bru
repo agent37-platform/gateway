@@ -15,13 +15,14 @@ tests {
     expect(res.status).to.equal(200);
   });
 
-  test("agent reachable", function () {
+  test("default backend reachable", function () {
     expect(res.body.ok).to.equal(true);
-    expect(res.body.hermes).to.equal(true);
+    expect(res.body.healthy).to.equal(true);
   });
 }
 
 docs {
-  Liveness + whether the Hermes worker is reachable.
-  No auth — the gateway runs on localhost behind the host/Docker.
+  Liveness + whether the instance's configured default backend is reachable.
+  Returns `{ ok, agent, healthy }` (plus a legacy `hermes` field when the default
+  is Hermes). No auth — the gateway runs on localhost behind the host/Docker.
 }

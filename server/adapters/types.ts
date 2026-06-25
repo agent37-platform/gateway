@@ -37,8 +37,10 @@ export interface StreamEvent {
 }
 
 /**
- * The seam every agent backend implements. v1 ships one implementation,
- * HermesWorkerAdapter; OpenClaw and Claude Code adapters slot in here later.
+ * The seam every harness backend implements. The registry (server/agent.ts) wires
+ * up multiple adapters — HermesWorkerAdapter and OpenClawAdapter today, Claude Code
+ * next — and a request routes to one via `agent`. (A given container only reaches
+ * the backend(s) it was provisioned with.)
  */
 export interface AgentAdapter {
   /** Stream a single turn. The async iterable ends after a `done` or `error`. */

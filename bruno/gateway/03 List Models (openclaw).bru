@@ -1,0 +1,34 @@
+meta {
+  name: 03 List Models (openclaw)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/v1/models?agent=openclaw
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: openclaw
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("is an OpenClaw model list", function () {
+    expect(res.body.object).to.equal("list");
+    expect(res.body.agent).to.equal("openclaw");
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The models the OpenClaw harness can run, selected with `?agent=openclaw`
+  (`hermes` | `openclaw`). Omit the filter (see "03 List Models") for the
+  gateway's configured default. Needs a reachable OpenClaw backend on this
+  instance — otherwise the gateway returns 502 agent_error.
+}

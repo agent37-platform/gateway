@@ -137,7 +137,7 @@ behind the host, which handles and forwards authentication.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `input` | string, required | The message or task. |
-| `agent` | string | `hermes` (default) or `openclaw`. Routing is per request, so include it on every turn of an `openclaw` session. |
+| `agent` | string | `hermes` or `openclaw`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
 | `session_id` | string | Continue a conversation. Omit to start a new one. |
 | `files` | string[] | Absolute paths of files to attach (from `POST /v1/files`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
@@ -226,11 +226,38 @@ stays stable.
 
 | Action | Endpoint |
 | --- | --- |
-| Models the agent can run | `GET /v1/models` |
-| Liveness + worker reachability | `GET /v1/health` |
+| Models a harness can run | `GET /v1/models` (configured default; add `?agent=hermes\|openclaw` to target one) |
+| Liveness + default-backend reachability | `GET /v1/health` |
 | Version | `GET /v1/version` |
 
-`GET /v1/models` and `/v1/health` report on the default agent (Hermes).
+`GET /v1/health` reports on the gateway's configured default harness.
+
+`GET /v1/models` returns the OpenAI list shape, so any OpenAI-compatible client
+works. It lists the models of one harness — the configured default, or the one
+named by an optional `?agent=` query param (e.g. `?agent=openclaw`) — and the
+response echoes which `agent` answered. Each entry carries the upstream provider
+in `owned_by` plus `label`, `source`, and `is_default`, so a UI can group models
+by provider and preselect the default:
+
+```jsonc
+{
+  "object": "list",
+  "agent": "hermes",             // which harness this list is for
+  "default_model": "hermes-4-405b",
+  "default_provider": "nous",
+  "data": [
+    {
+      "id": "hermes-4-405b",
+      "object": "model",
+      "created": 0,                  // we don't track per-model creation time
+      "owned_by": "nous",            // upstream provider
+      "label": "Hermes 4 405B",
+      "source": "catalog",           // current | catalog | custom | alias
+      "is_default": true
+    }
+  ]
+}
+```
 
 ### Errors
 
@@ -276,17 +303,18 @@ A [Bruno](https://www.usebruno.com/) collection lives in [`bruno/`](bruno/) —
 open that folder in Bruno, pick the **local** environment (`baseUrl`
 `http://localhost:3737`), and run the requests top to bottom. *Create Response*
 saves the `session_id` and response id into the environment, so *Continue
-Session*, *Get Response*, *Cancel*, and *Delete Session* just work. Requests
-13–14 do the same for OpenClaw (start `openclaw` locally first). For
-*Upload File*, pick any local file first; it saves the uploaded path for
+Session*, *Get Response*, *Cancel*, and *Delete Session* just work. The
+*(openclaw)* requests do the same for OpenClaw (start `openclaw` locally first).
+For *Upload File*, pick any local file first; it saves the uploaded path for
 *Download File*.
 
 ## Configuration
 
 All optional — see [`.env.example`](.env.example). Highlights: `PORT` (3737),
-`HOST` (0.0.0.0), `AGENT37_GATEWAY_HOME` (`~/.agent37-gateway`), the `HERMES_*`
-variables that locate the Hermes install, and `OPENCLAW_BASE_URL` /
-`OPENCLAW_TOKEN` for the OpenClaw route.
+`HOST` (0.0.0.0), `GATEWAY_DEFAULT_AGENT` (the harness a turn routes to when the
+request omits `agent`; `hermes` by default), `AGENT37_GATEWAY_HOME`
+(`~/.agent37-gateway`), the `HERMES_*` variables that locate the Hermes install,
+and `OPENCLAW_BASE_URL` / `OPENCLAW_TOKEN` for the OpenClaw route.
 
 ## Roadmap
 

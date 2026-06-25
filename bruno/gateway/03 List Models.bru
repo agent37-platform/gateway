@@ -15,12 +15,26 @@ tests {
     expect(res.status).to.equal(200);
   });
 
-  test("has a model list", function () {
+  test("is an OpenAI-style model list for a harness", function () {
+    expect(res.body.object).to.equal("list");
+    expect(res.body.agent).to.be.a("string");
     expect(res.body.data).to.be.an("array");
+  });
+
+  test("each model has the OpenAI shape", function () {
+    res.body.data.forEach(function (model) {
+      expect(model.object).to.equal("model");
+      expect(model.id).to.be.a("string");
+      expect(model.owned_by).to.be.a("string");
+      expect(model).to.have.property("is_default");
+    });
   });
 }
 
 docs {
-  The models this instance's agent can run on. Pass any `id` as `model`
-  (with its `provider`) on a Create Response call.
+  The models a harness on this gateway can run on, in the OpenAI list shape
+  ({ object: "list", data: [...] }). Add `?agent=` to pick a harness (default =
+  the gateway's configured default); the response echoes which `agent` answered.
+  The upstream provider is in `owned_by`; `label`, `source`, and `is_default` are
+  extensions a UI can group on. Pass any `id` as `model` on a Create Response call.
 }

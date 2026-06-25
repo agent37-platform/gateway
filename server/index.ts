@@ -50,7 +50,7 @@ async function main() {
     await adapter.start?.();
   } catch (error) {
     console.error(
-      'Hermes worker failed to start — the gateway will serve but agent calls fail until the worker recovers:',
+      'Hermes backend failed to start — the gateway will serve but Hermes-routed turns fail until the worker recovers (other configured harnesses are unaffected):',
       error instanceof Error ? error.message : error,
     );
   }

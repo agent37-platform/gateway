@@ -77,8 +77,23 @@ test('health, version, and models endpoints answer from the real gateway', async
   assert.equal(version.name, 'agent37-gateway');
   assert.ok(version.version.length > 0);
 
-  const models = await jsonOk<{ data: unknown[] }>(await fetch(`${base}/v1/models`));
+  const models = await jsonOk<{ object: string; agent: string; data: Record<string, unknown>[] }>(
+    await fetch(`${base}/v1/models`),
+  );
+  assert.equal(models.object, 'list');
+  assert.equal(models.agent, 'hermes');
   assert.ok(Array.isArray(models.data));
+  for (const model of models.data) {
+    assert.equal(model.object, 'model');
+    assert.equal(typeof model.id, 'string');
+    assert.equal(typeof model.owned_by, 'string');
+  }
+
+  // `?agent=` selects the harness; the default agent is echoed back either way.
+  const defaulted = await jsonOk<{ agent: string }>(
+    await fetch(`${base}/v1/models?agent=hermes`),
+  );
+  assert.equal(defaulted.agent, 'hermes');
 });
 
 test('responses and sessions work end-to-end through the local LLM', async () => {

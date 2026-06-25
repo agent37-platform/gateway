@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { SessionMessage } from '../../shared/types.js';
 import { SUPPORTED_AGENTS } from '../../shared/types.js';
 import { getAdapter } from '../agent.js';
-import { gatewayErrorFromWorker, optionalEnum, sessionNotFound } from '../errors.js';
+import { gatewayErrorFromWorker, optionalEnum, queryParam, sessionNotFound } from '../errors.js';
 import {
   deleteResponsesForSession,
   deleteSession,
@@ -17,8 +17,7 @@ export const sessionsRouter = Router();
 sessionsRouter.get('/', (req, res, next) => {
   try {
     // `?agent=` (empty) is treated as absent → all sessions; an unknown agent is a 400.
-    const raw = req.query.agent === '' ? undefined : req.query.agent;
-    const agent = optionalEnum(raw, 'agent', SUPPORTED_AGENTS, null);
+    const agent = optionalEnum(queryParam(req.query.agent), 'agent', SUPPORTED_AGENTS, null);
     res.json({ data: listSessions(agent) });
   } catch (error) {
     next(error);
@@ -30,7 +29,7 @@ sessionsRouter.get('/:id', async (req, res, next) => {
   const session = getSession(req.params.id);
   if (!session) return next(sessionNotFound(req.params.id));
 
-  // No turns yet → no Hermes session exists, so history is empty.
+  // No turns yet → no backend session exists, so history is empty.
   if (session.last_response_at === null) {
     return res.json({ ...session, history: [] });
   }
@@ -56,7 +55,7 @@ sessionsRouter.delete('/:id', async (req, res, next) => {
   const session = getSession(req.params.id);
   if (!session) return next(sessionNotFound(req.params.id));
 
-  // Best-effort removal of the Hermes transcript before dropping our records.
+  // Best-effort removal of the harness backend's transcript before dropping our records.
   try {
     await getAdapter(session.agent).deleteSession(session.id);
   } catch {

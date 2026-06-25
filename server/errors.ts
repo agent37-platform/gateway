@@ -54,6 +54,12 @@ export function optionalEnum<T extends string>(
   return value as T;
 }
 
+/** Express parses a valueless query key (`?agent=`) as `''`; normalize that to
+ *  `undefined` so it falls through to a fallback instead of failing validation. */
+export function queryParam(value: unknown): unknown {
+  return value === '' ? undefined : value;
+}
+
 export function sessionNotFound(id: string): GatewayError {
   return new GatewayError(404, 'session_not_found', `No session with id '${id}'.`);
 }

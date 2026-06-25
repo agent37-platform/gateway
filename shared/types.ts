@@ -21,10 +21,11 @@ export const SUPPORTED_AGENTS = ['hermes', 'openclaw'] as const;
 export type AgentType = (typeof SUPPORTED_AGENTS)[number];
 export const DEFAULT_AGENT: AgentType = 'hermes';
 
-/** The agent a turn routes to when the request omits `agent`. One gateway runs
- *  one agent backend per instance, so the image sets GATEWAY_DEFAULT_AGENT to
- *  match what it bakes (the OpenClaw image sets it to "openclaw"); unset or
- *  unknown falls back to DEFAULT_AGENT, preserving Hermes-image behavior. */
+/** The DEFAULT harness a request routes to when it omits `agent`.
+ *  GATEWAY_DEFAULT_AGENT names it (the OpenClaw image sets it to "openclaw"); a
+ *  request can still target any supported harness via `agent`. Unset or unknown
+ *  falls back to DEFAULT_AGENT, preserving Hermes-image behavior. This is the
+ *  default only, not a one-backend-per-instance limit. */
 export function resolveConfiguredDefaultAgent(raw: string | undefined | null): AgentType {
   const value = (raw ?? '').trim();
   return (SUPPORTED_AGENTS as readonly string[]).includes(value) ? (value as AgentType) : DEFAULT_AGENT;
@@ -87,7 +88,7 @@ export interface ResponseObject {
 // Public API: sessions
 // ---------------------------------------------------------------------------
 
-/** One conversation. The gateway holds the index; Hermes owns the transcript. */
+/** One conversation. The gateway holds the index; the session's harness backend (Hermes, OpenClaw, ...) owns the transcript. */
 export interface SessionObject {
   id: string;
   agent: AgentType;
@@ -97,7 +98,7 @@ export interface SessionObject {
   last_response_at: number | null;
 }
 
-/** A message in a session's history, projected from Hermes SessionDB. */
+/** A message in a session's history, projected from the session's harness backend (Hermes SessionDB, OpenClaw history, ...). */
 export interface SessionMessage {
   id: string;
   session_id: string;
@@ -234,14 +235,26 @@ export interface GoalDecision {
 // Public API: GET /v1/models response
 // ---------------------------------------------------------------------------
 
+// OpenAI-compatible model object: the four standard fields (id/object/created/
+// owned_by) plus additive extensions a UI can group and label on. `owned_by`
+// carries the upstream provider (OpenAI's native slot, e.g. "nous").
 export interface ModelInfo {
   id: string;
+  object: 'model';
+  /** Unix seconds. We don't track per-model creation time, so this is a stable
+   *  placeholder that keeps the object schema-valid for standard clients. */
+  created: number;
+  owned_by: string;
   label: string;
-  provider: string | null;
+  source: AgentModelOption['source'];
   is_default: boolean;
 }
 
 export interface ModelsListResponse {
+  object: 'list';
+  /** Which harness this list is for. Defaults to the gateway's configured
+   *  default; selectable per request via `?agent=`. */
+  agent: AgentType;
   default_model: string | null;
   default_provider: string | null;
   data: ModelInfo[];

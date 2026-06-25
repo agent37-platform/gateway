@@ -1,7 +1,7 @@
 meta {
-  name: 16 Get Session (openclaw history)
+  name: 10 Get Session (openclaw history)
   type: http
-  seq: 16
+  seq: 10
 }
 
 get {
@@ -24,7 +24,7 @@ tests {
 
 docs {
   The OpenClaw session plus its transcript. Reuses `openclawSessionId` saved by
-  "13 Create Response (openclaw)". History is projected on demand from OpenClaw's
+  "04 Create Response (openclaw)". History is projected on demand from OpenClaw's
   `/v1/conversations/{user}` endpoint — the gateway never duplicates messages.
 
   OpenClaw must expose that read endpoint for history to be non-empty; otherwise

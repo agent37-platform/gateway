@@ -4,14 +4,14 @@ Guidance for AI coding agents working in this repo. `CLAUDE.md` imports this fil
 
 ## What this is
 
-The Agent37 Gateway: the Responses-style HTTP API (`/v1`, port 3737) that runs inside each Agent37 instance and drives the agent behind it — Hermes today via a Python worker; OpenClaw and Claude Code next, behind the same adapter seam. `README.md` is the API contract (request shapes, SSE events, error codes); keep it exact when the surface changes — it feeds the hosted reference at `www.agent37.com/docs`.
+The Agent37 Gateway: the Responses-style HTTP API (`/v1`, port 3737) that runs inside each Agent37 instance and drives whichever harness a request targets through the `AgentAdapter` seam — Hermes (via a Python worker) and OpenClaw today, Claude Code next. A turn picks its harness with the `agent` field; `GATEWAY_DEFAULT_AGENT` sets the default when `agent` is omitted (a container only runs the backend(s) it was provisioned with, so targeting an unprovisioned harness fails at request time). `README.md` is the API contract (request shapes, SSE events, error codes); keep it exact when the surface changes — it feeds the hosted reference at `www.agent37.com/docs`.
 
 Orientation (Node >= 24, TypeScript ESM):
 
 - `server/routes/` — the `/v1` surface (responses, sessions, models, files)
-- `server/adapters/` — the `AgentAdapter` seam (`types.ts`), the Hermes adapter, and the JSONL worker protocol (`worker-protocol.ts`)
+- `server/adapters/` — the `AgentAdapter` seam (`types.ts`), the Hermes and OpenClaw adapters, and the JSONL worker protocol (`worker-protocol.ts`)
 - `server/workers/hermes_worker.py` — the Python side; imports Hermes directly. `npm run selftest:worker` checks it can reach Hermes without booting the server
-- `server/live-runs.ts` + `server/db/` — in-memory replayable event buffers for in-flight responses; SQLite for response/session metadata (transcripts are never duplicated — they're projected from Hermes' SessionDB)
+- `server/live-runs.ts` + `server/db/` — in-memory replayable event buffers for in-flight responses; SQLite for response/session metadata (transcripts are never duplicated — they're projected from the session's harness backend: Hermes' SessionDB, OpenClaw's history, ...)
 - `shared/types.ts` — the public API types; `test/` — the integration suite; `bruno/` — hand-poke collection (see `bruno/README.md`)
 
 ## Engineering practices
