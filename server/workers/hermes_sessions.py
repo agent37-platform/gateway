@@ -355,7 +355,9 @@ def list_sessions(limit: int = 100) -> dict[str, Any]:
     Returns ``{"sessions": [...]}`` ordered by most-recent activity — the same
     view Hermes itself shows (one logical conversation per entry, compression
     chains projected to their live tip). Each entry carries Hermes' own keys
-    (id, title, model, message_count, started_at, last_active, preview, ...).
+    (id, title, model, message_count, started_at, last_active, preview, ...),
+    minus ``system_prompt``: the full agent-persona text is useless in a list
+    view and dwarfs every other field, so it is dropped here.
     """
     import hermes_worker
 
@@ -367,10 +369,12 @@ def list_sessions(limit: int = 100) -> dict[str, Any]:
         )
     db = hermes_worker._SessionDB()
     try:
-        sessions = db.list_sessions_rich(limit=limit, order_by_last_active=True)
+        sessions = list(db.list_sessions_rich(limit=limit, order_by_last_active=True))
     except Exception as exc:
         raise WorkerError(f"Could not list Hermes sessions: {exc}", code="session_load_error") from exc
-    return {"sessions": list(sessions)}
+    for session in sessions:
+        session.pop("system_prompt", None)
+    return {"sessions": sessions}
 
 
 def delete_session(session_id: Any) -> dict[str, Any]:
