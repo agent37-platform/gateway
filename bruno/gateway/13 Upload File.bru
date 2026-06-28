@@ -4,14 +4,18 @@ meta {
   seq: 13
 }
 
-post {
-  url: {{baseUrl}}/v1/files
-  body: multipartForm
+put {
+  url: {{baseUrl}}/v1/files/content?path=~/.agent37-gateway/workspace/bruno-upload.txt
+  body: text
   auth: none
 }
 
-body:multipart-form {
-  file: @file()
+params:query {
+  path: ~/.agent37-gateway/workspace/bruno-upload.txt
+}
+
+body:text {
+  Hello from Bruno. The secret marker is 4242.
 }
 
 script:post-response {
@@ -25,16 +29,18 @@ tests {
     expect(res.status).to.equal(200);
   });
 
-  test("returns the workspace path", function () {
+  test("returns the written FileEntry", function () {
     expect(res.body.path).to.be.a("string");
-    expect(res.body.filename).to.be.a("string");
-    expect(res.body.bytes).to.be.a("number");
+    expect(res.body.type).to.equal("file");
+    expect(res.body.size).to.be.a("number");
   });
 }
 
 docs {
-  Pick any local file for the `file` field, then run. The returned `path`
-  (saved to the env as `uploadedFilePath`) is the file's identity — attach it
-  to a turn by adding `"files": ["{{uploadedFilePath}}"]` to Create Response,
-  or download it back with 14 Download File.
+  Writes the raw request body to `path` (not multipart) and returns the written
+  file's `FileEntry`. The returned `path` (saved to the env as
+  `uploadedFilePath`) is the file's identity — attach it to a turn by adding
+  `"files": ["{{uploadedFilePath}}"]` to Create Response, or read it back with
+  14 Download File. Edit the body or `path` to write anything; `overwrite`
+  defaults to true.
 }

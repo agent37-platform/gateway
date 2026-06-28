@@ -14,7 +14,15 @@ const app = express();
 app.use(cors());
 // A turn request is small (input text + a few fields). Keep the limit modest so
 // an oversized body can't be a memory vector; oversize → 413 payload_too_large.
-app.use(express.json({ limit: '2mb' }));
+// PUT /v1/files/content is the one exception: it carries raw file bytes of any
+// size, so it opts out of JSON parsing and the limit — the files route streams
+// that body straight to disk.
+app.use(
+  express.json({
+    limit: '2mb',
+    type: (req) => (req as Request).path !== '/v1/files/content' && Boolean((req as Request).is('application/json')),
+  }),
+);
 
 app.get('/v1/health', async (req, res, next) => {
   try {

@@ -143,7 +143,7 @@ behind the host, which handles and forwards authentication.
 | `input` | string, required | The message or task. |
 | `agent` | string | `hermes` or `openclaw`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
 | `session_id` | string | Continue a conversation. Omit to start a new one. |
-| `files` | string[] | Absolute paths of files to attach (from `POST /v1/files`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
+| `files` | string[] | Absolute paths of files to attach (write them first with `PUT /v1/files/content`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
 | `model` / `provider` | string | The LLM to run on. List options at `GET /v1/models`. |
 | `reasoning_effort` | string | `none` … `xhigh`. |
@@ -199,32 +199,65 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 
 ### Files
 
-Files live on the instance's disk, in the agent's workspace
-(`<home>/workspace`) — the worker's working directory. A path is the file's
-identity; there are no file ids.
+Files live on the instance's disk — the `sk_live_` key is the instance root, so
+a path can name anything on it (there's no jail). A path (resolved, absolute) is
+the file's identity; there are no file ids. The listing defaults to the agent's
+workspace (`<home>/workspace`, the worker's working directory), so files written
+there are the files the agent reads from disk.
+
+Every entry — in a listing and returned by every write — is a `FileEntry`:
+
+```jsonc
+{
+  "name": "leads.csv",            // basename
+  "path": "/home/user/leads.csv", // resolved absolute path (the identity)
+  "type": "file",                 // file | directory | symlink | other
+  "size": 1024,                   // bytes; null for directories
+  "modified": 1719500000123,      // mtime, epoch milliseconds
+  "hidden": false                 // name starts with "."
+}
+```
 
 | Action | Endpoint |
 | --- | --- |
-| Upload (multipart, one file in a `file` field) | `POST /v1/files` → `{ path, filename, bytes }` |
-| Download (e.g. a file the agent produced) | `GET /v1/files/content?path=…` |
+| List one directory level | `GET /v1/files?path=<dir>` (defaults to the workspace) |
+| Read / preview / download | `GET /v1/files/content?path=<file>&disposition=inline\|attachment` |
+| Write raw bytes (create/overwrite/edit/upload) | `PUT /v1/files/content?path=<file>&overwrite=true\|false` |
+| Delete (recursive, force) | `DELETE /v1/files?path=<path>` → `{ ok: true }` |
+| Rename / move | `PATCH /v1/files` body `{ from, to }` |
+| Create a directory (mkdir -p) | `POST /v1/files/dir?path=<dir>` |
 
-The chat loop: upload, pass the returned `path` in `files` on
-`POST /v1/responses`, and when the agent replies that it wrote a file, fetch
-that path from `/v1/files/content`.
+`GET /v1/files` returns `{ path, parentPath, entries, truncated }` — one level,
+directories first then name (case-insensitive), capped at 1000 entries
+(`truncated: true` past that). `parentPath` is null at the filesystem root.
+
+`GET /v1/files/content` sets `Content-Type` from the extension and streams at any
+size; `disposition` defaults to `attachment` (download), `inline` lets a browser
+render it.
+
+`PUT /v1/files/content` writes the **raw request body** (not multipart) to the
+path, creating parent directories as needed, and returns the new `FileEntry`.
+`overwrite` defaults to true; with `overwrite=false` an existing file is a
+`409 file_exists`. Pass an `X-Expected-Mtime` header (epoch ms) for optimistic
+concurrency — if the file changed since you read it, the write is a `412 modified`.
+
+The chat loop: write a file with `PUT /v1/files/content`, pass its `path` in
+`files` on `POST /v1/responses`, and when the agent replies that it wrote a file,
+fetch it from `GET /v1/files/content`.
 
 ```bash
-curl -F "file=@leads.csv" http://localhost:3737/v1/files
-# → { "path": "/home/user/.agent37-gateway/workspace/uploads/3f2a1b9c-leads.csv", … }
+curl -X PUT --data-binary @leads.csv \
+  'http://localhost:3737/v1/files/content?path=/home/user/leads.csv'
+# → { "path": "/home/user/leads.csv", "type": "file", "size": 1024, … }
 
 curl http://localhost:3737/v1/responses -H 'content-type: application/json' -d '{
   "input": "Summarize the attached spreadsheet.",
-  "files": ["/home/user/.agent37-gateway/workspace/uploads/3f2a1b9c-leads.csv"]
+  "files": ["/home/user/leads.csv"]
 }'
 ```
 
-Uploads are kept until you delete them from the workspace yourself (there is no
-garbage collection), and stored paths assume the instance's home directory
-stays stable.
+Files are kept until you delete them yourself (there is no garbage collection),
+and stored paths assume the instance's home directory stays stable.
 
 ### Models & health
 
@@ -277,11 +310,14 @@ Every error returns a stable, machine-readable body. Branch on `code`, show
 | Code | HTTP | When |
 | --- | --- | --- |
 | `validation_error` | 400 | A request field was invalid (see `param`). |
+| `not_a_directory` | 400 | `GET /v1/files` was given a path that isn't a directory. |
 | `response_not_found` | 404 | No response with that id. |
 | `file_not_found` | 404 | No file at that path. |
 | `not_found` | 404 | Unknown route. |
 | `session_busy` | 409 | A response is already running on the session. |
 | `title_conflict` | 409 | The requested session title is already in use by another session. |
+| `file_exists` | 409 | `PUT /v1/files/content?overwrite=false` and the file already exists. |
+| `modified` | 412 | `PUT /v1/files/content`'s `X-Expected-Mtime` no longer matches the file. |
 | `rename_unsupported` | 405 | The targeted harness can't rename sessions (no native editable title). |
 | `payload_too_large` | 413 | Request body exceeded the size limit. |
 | `rate_limited` | 429 | The upstream agent/provider was rate-limited. |
@@ -313,7 +349,7 @@ open that folder in Bruno, pick the **local** environment (`baseUrl`
 saves the `session_id` and response id into the environment, so *Continue
 Session*, *Cancel*, and *Delete Session* just work. The
 *(openclaw)* requests do the same for OpenClaw (start `openclaw` locally first).
-For *Upload File*, pick any local file first; it saves the uploaded path for
+*Upload File* writes a file via `PUT /v1/files/content` and saves its path for
 *Download File*.
 
 ## Configuration

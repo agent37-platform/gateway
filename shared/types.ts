@@ -105,13 +105,32 @@ export interface SessionMessage {
 // Public API: files
 // ---------------------------------------------------------------------------
 
-/** The result of POST /v1/files. `path` is the file's absolute location in the
- *  agent's workspace — pass it back in `files` on POST /v1/responses, or to
- *  GET /v1/files/content to download it. */
-export interface FileUploadResult {
+/** One entry in the agent's filesystem. `path` (resolved, absolute) is the
+ *  identity used by every other /v1/files call. Returned by the directory
+ *  listing and echoed back by every write (PUT/PATCH/mkdir). */
+export interface FileEntry {
+  /** Basename. */
+  name: string;
+  /** Resolved absolute path — the identity for all other /v1/files calls. */
   path: string;
-  filename: string;
-  bytes: number;
+  type: 'file' | 'directory' | 'symlink' | 'other';
+  /** Bytes; null for directories. */
+  size: number | null;
+  /** mtimeMs — epoch milliseconds. */
+  modified: number;
+  /** Name starts with ".". */
+  hidden: boolean;
+}
+
+/** The result of GET /v1/files: one directory level. */
+export interface FileListResponse {
+  /** The resolved absolute directory that was listed. */
+  path: string;
+  /** The parent directory, or null at the filesystem root. */
+  parentPath: string | null;
+  entries: FileEntry[];
+  /** True when the directory held more than the cap and the list was clipped. */
+  truncated: boolean;
 }
 
 // ---------------------------------------------------------------------------

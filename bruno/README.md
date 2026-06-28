@@ -10,8 +10,8 @@ API requests for poking the gateway locally, using [Bruno](https://www.usebruno.
 4. Run the requests in order. They chain through env vars:
    - **04 Create Response** saves `session_id` and `responseId`.
    - **05 Continue Session**, **10 Get Session**, **11 Cancel**, **12 Delete**, **15 Rename Session** reuse them.
-   - **13 Upload File** saves `uploadedFilePath` (pick any local file for its
-     `file` field first), which **14 Download File** reuses.
+   - **13 Upload File** writes a file via `PUT /v1/files/content` (raw body) and
+     saves `uploadedFilePath`, which **14 Download File** reuses.
 
 There's no auth — the gateway is a localhost service (the host/Docker handles
 auth in production), so every request uses `auth: none`.
