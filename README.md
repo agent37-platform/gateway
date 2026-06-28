@@ -222,6 +222,7 @@ Every entry — in a listing and returned by every write — is a `FileEntry`:
 | --- | --- |
 | List one directory level | `GET /v1/files?path=<dir>` (defaults to the workspace) |
 | Read / preview / download | `GET /v1/files/content?path=<file>&disposition=inline\|attachment` |
+| Download a folder as `.tar.gz` | `GET /v1/files/archive?path=<dir>` (defaults to the workspace) |
 | Write raw bytes (create/overwrite/edit/upload) | `PUT /v1/files/content?path=<file>&overwrite=true\|false` |
 | Delete (recursive, force) | `DELETE /v1/files?path=<path>` → `{ ok: true }` |
 | Rename / move | `PATCH /v1/files` body `{ from, to }` |
@@ -234,6 +235,13 @@ directories first then name (case-insensitive), capped at 1000 entries
 `GET /v1/files/content` sets `Content-Type` from the extension and streams at any
 size; `disposition` defaults to `attachment` (download), `inline` lets a browser
 render it.
+
+`GET /v1/files/archive` streams a directory as a gzipped tar (`.tar.gz`), produced
+by piping the system `tar` — any size, flat memory, and it unpacks to one
+top-level folder named after the directory (`application/gzip`,
+`Content-Disposition: attachment`). Symlinks are stored as links, not followed.
+There is no folder-upload counterpart — recreate a tree with per-file
+`PUT /v1/files/content` calls (each `mkdir -p`s its parents).
 
 `PUT /v1/files/content` writes the **raw request body** (not multipart) to the
 path, creating parent directories as needed, and returns the new `FileEntry`.
@@ -310,7 +318,7 @@ Every error returns a stable, machine-readable body. Branch on `code`, show
 | Code | HTTP | When |
 | --- | --- | --- |
 | `validation_error` | 400 | A request field was invalid (see `param`). |
-| `not_a_directory` | 400 | `GET /v1/files` was given a path that isn't a directory. |
+| `not_a_directory` | 400 | `GET /v1/files` or `GET /v1/files/archive` was given a path that isn't a directory. |
 | `response_not_found` | 404 | No response with that id. |
 | `file_not_found` | 404 | No file at that path. |
 | `not_found` | 404 | Unknown route. |

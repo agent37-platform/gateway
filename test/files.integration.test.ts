@@ -3,7 +3,8 @@
 // alone with: node --import tsx --test test/files.integration.test.ts
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { startTestServer, type TestServer } from './test-helpers.js';
@@ -35,6 +36,23 @@ function freshDir(): string {
 const filesUrl = (path: string) => `${base}/v1/files?path=${encodeURIComponent(path)}`;
 const contentUrl = (path: string, query = '') =>
   `${base}/v1/files/content?path=${encodeURIComponent(path)}${query}`;
+const archiveUrl = (path: string) => `${base}/v1/files/archive?path=${encodeURIComponent(path)}`;
+
+/** Extract a fetched .tar.gz response body into a fresh dir; returns that dir. */
+async function extractArchive(res: Response): Promise<string> {
+  const buf = Buffer.from(await res.arrayBuffer());
+  // gzip magic — proves we streamed a real gzip stream, not an error body.
+  assert.equal(buf[0], 0x1f);
+  assert.equal(buf[1], 0x8b);
+  const work = freshDir();
+  const tgz = join(work, 'archive.tar.gz');
+  writeFileSync(tgz, buf);
+  const out = join(work, 'out');
+  mkdirSync(out);
+  const r = spawnSync('tar', ['-xzf', tgz, '-C', out]);
+  assert.equal(r.status, 0, r.stderr?.toString());
+  return out;
+}
 
 test('GET /v1/files lists one level: dirs first, then case-insensitive name', async () => {
   const dir = freshDir();
@@ -288,4 +306,78 @@ test('POST /v1/files/dir is mkdir -p and idempotent', async () => {
   const noPath = await fetch(`${base}/v1/files/dir`, { method: 'POST' });
   assert.equal(noPath.status, 400);
   assert.equal((await noPath.json()).error.param, 'path');
+});
+
+test('GET /v1/files/archive streams a .tar.gz that unpacks to one top-level folder', async () => {
+  const dir = freshDir();
+  const proj = join(dir, 'proj');
+  mkdirSync(join(proj, 'nested/deep'), { recursive: true });
+  writeFileSync(join(proj, 'top.txt'), 'top');
+  writeFileSync(join(proj, 'nested/deep/file.txt'), 'deep');
+
+  const res = await fetch(archiveUrl(proj));
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/gzip');
+  assert.match(res.headers.get('content-disposition') ?? '', /attachment; filename="proj\.tar\.gz"/);
+
+  // Round-trips: the tarball unpacks to a single `proj/` dir with the tree intact.
+  const out = await extractArchive(res);
+  assert.equal(readFileSync(join(out, 'proj/top.txt'), 'utf8'), 'top');
+  assert.equal(readFileSync(join(out, 'proj/nested/deep/file.txt'), 'utf8'), 'deep');
+});
+
+test('GET /v1/files/archive treats a dash-led directory name as a path, not a flag', async () => {
+  // Without `--` in the tar argv, `--weird` would be parsed as an option (RCE/arg
+  // injection vector). With it, the dir archives normally.
+  const dir = freshDir();
+  const weird = join(dir, '--weird');
+  mkdirSync(weird);
+  writeFileSync(join(weird, 'a.txt'), 'x');
+
+  const res = await fetch(archiveUrl(weird));
+  assert.equal(res.status, 200);
+  const out = await extractArchive(res);
+  assert.equal(readFileSync(join(out, '--weird/a.txt'), 'utf8'), 'x');
+});
+
+test('GET /v1/files/archive stores symlinks as links, never the target bytes', async () => {
+  // No `-h`/`--dereference`: a symlink must round-trip as a symlink, so the archive can't be used
+  // to exfiltrate a link target's contents as inlined file bytes.
+  const dir = freshDir();
+  const proj = join(dir, 'proj');
+  mkdirSync(proj);
+  writeFileSync(join(proj, 'secret.txt'), 'classified');
+  symlinkSync(join(proj, 'secret.txt'), join(proj, 'link'));
+
+  const out = await extractArchive(await fetch(archiveUrl(proj)));
+  assert.equal(lstatSync(join(out, 'proj/link')).isSymbolicLink(), true);
+});
+
+test('GET /v1/files/archive sanitizes the Content-Disposition filename', async () => {
+  // A directory name is agent-controlled and Linux allows almost anything in it; quotes (which would
+  // break out of the header) must be stripped, leaving a clean `*.tar.gz` download name.
+  const dir = freshDir();
+  const weird = join(dir, 'my "quoted" dir');
+  mkdirSync(weird);
+  writeFileSync(join(weird, 'a.txt'), 'x');
+
+  const res = await fetch(archiveUrl(weird));
+  assert.equal(res.status, 200);
+  const cd = res.headers.get('content-disposition') ?? '';
+  assert.match(cd, /filename="my quoted dir\.tar\.gz"/);
+  await res.arrayBuffer(); // drain the stream so the connection closes cleanly
+});
+
+test('GET /v1/files/archive errors before streaming: 404 missing, 400 not-a-directory', async () => {
+  const dir = freshDir();
+  const file = join(dir, 'a.txt');
+  writeFileSync(file, 'x');
+
+  const missing = await fetch(archiveUrl(join(dir, 'nope')));
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json()).error.code, 'file_not_found');
+
+  const notDir = await fetch(archiveUrl(file));
+  assert.equal(notDir.status, 400);
+  assert.equal((await notDir.json()).error.code, 'not_a_directory');
 });
