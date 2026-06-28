@@ -3,6 +3,7 @@
 // The worker runs with cwd = the workspace, so files written here are the files
 // the agent reads from disk, and files the agent produces are read back here.
 
+import { spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { lstat, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
@@ -89,6 +90,21 @@ async function toFileEntry(path: string): Promise<FileEntry> {
   };
 }
 
+/** A safe download filename for an archive of `dirName`: keep only filename-safe
+ *  characters (drops the CR/LF, quotes, and slashes that could break or escape
+ *  the header), fall back to `archive`, and always end `.tar.gz`. */
+function archiveFilename(dirName: string): string {
+  const cleaned = dirName.replace(/[^A-Za-z0-9._ -]/g, '').trim();
+  return `${cleaned || 'archive'}.tar.gz`;
+}
+
+/** A Content-Disposition value with an ASCII `filename=` fallback plus an RFC 5987
+ *  `filename*` for non-ASCII names. */
+function attachmentDisposition(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
 // GET /v1/files?path=<dir> — list one directory level. `path` is optional and
 // defaults to the agent workspace dir. Directories sort first, then by name.
 filesRouter.get('/', async (req, res, next) => {
@@ -154,6 +170,72 @@ filesRouter.get('/content', async (req, res, next) => {
     } else {
       res.download(path, basename(path), { dotfiles: 'allow' }, onDone);
     }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /v1/files/archive?path=<dir> — download a directory as a streamed .tar.gz.
+// `path` is optional and defaults to the workspace dir. The archive is produced
+// by piping the system `tar` straight to the response, so it streams at any size
+// with flat memory. tar.gz only — the image has gzip but no zip packer.
+filesRouter.get('/archive', async (req, res, next) => {
+  try {
+    const raw = req.query.path;
+    const dir = typeof raw === 'string' && raw.trim() ? resolveHomeAwarePath(raw) : resolveWorkspaceDir();
+
+    let stats;
+    try {
+      stats = await stat(dir);
+    } catch {
+      throw fileNotFound(dir);
+    }
+    if (!stats.isDirectory()) throw notADirectory(dir);
+
+    const name = basename(dir);
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', attachmentDisposition(archiveFilename(name)));
+    // Send the headers before spawning tar. The mesh/host-proxy header timeout
+    // fires on the container's *response* headers, and Node holds them until the
+    // first body byte — a slow-first-byte tar (a huge first file or deep tree)
+    // would trip it. Flushing up front means only the looser inter-chunk gap
+    // timeout applies once bytes start flowing.
+    res.flushHeaders();
+
+    // `-C <parent> -- <name>`: archive the directory by name relative to its
+    // parent so the tarball unpacks to a single top-level folder. `--` ends
+    // options because `name` is agent-controlled — a directory literally named
+    // `--checkpoint-action=...` must be treated as a path, not a tar flag. No
+    // `-h`/`--dereference`: symlinks stay link entries, never their target bytes.
+    const child = spawn('tar', ['-czf', '-', '-C', dirname(dir), '--', name], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+
+    // A client that disconnects mid-download must not orphan tar.
+    res.on('close', () => {
+      if (!child.killed) child.kill('SIGKILL');
+    });
+
+    // Manage end-of-response ourselves (end:false) so the exit code decides
+    // between a clean end and a torn connection.
+    child.stdout.pipe(res, { end: false });
+
+    child.on('error', () => {
+      // tar could not even spawn; headers are already out, so the only signal we
+      // can give the client is a torn connection.
+      if (!res.destroyed) res.destroy();
+    });
+    child.on('close', (code) => {
+      if (res.destroyed || res.writableEnded) return;
+      // Only a clean exit (0) or tar's "some files changed/vanished as we read
+      // them" warning (1, expected on a live workspace) is success. Anything else
+      // — a fatal code (>1) or signal death (code === null, e.g. the OOM-killer
+      // reaping tar mid-archive) — means the gzip stream was cut mid-write. The
+      // headers are already flushed, so tear the connection rather than res.end()
+      // a truncated archive into a clean EOF the client would trust.
+      if (code === 0 || code === 1) res.end();
+      else res.destroy();
+    });
   } catch (error) {
     next(error);
   }
