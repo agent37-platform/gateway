@@ -49,7 +49,7 @@ function parseFiles(value: unknown): string[] {
     try {
       stats = statSync(path);
     } catch {
-      throw validationError(`files entry '${p}' does not exist on this instance.`, 'files', 'Upload it first via POST /v1/files.');
+      throw validationError(`files entry '${p}' does not exist on this instance.`, 'files', 'Upload it first via PUT /v1/files/content.');
     }
     if (!stats.isFile()) throw validationError(`files entry '${p}' is not a file.`, 'files');
     return path;

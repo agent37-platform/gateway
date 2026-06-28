@@ -68,6 +68,22 @@ export function fileNotFound(path: string): GatewayError {
   return new GatewayError(404, 'file_not_found', `No file at '${path}'.`);
 }
 
+export function notADirectory(path: string): GatewayError {
+  return new GatewayError(400, 'not_a_directory', `'${path}' is not a directory.`, { param: 'path' });
+}
+
+export function fileExists(path: string): GatewayError {
+  return new GatewayError(409, 'file_exists', `A file already exists at '${path}'.`, {
+    hint: 'Pass overwrite=true to replace it.',
+  });
+}
+
+export function fileModified(path: string): GatewayError {
+  return new GatewayError(412, 'modified', `'${path}' was modified since it was last read.`, {
+    hint: 'Re-read the file to get its current X-Expected-Mtime, then retry.',
+  });
+}
+
 export function sessionBusy(): GatewayError {
   return new GatewayError(409, 'session_busy', 'A response is already running on this session.', {
     hint: 'Cancel the running response, or start another session.',

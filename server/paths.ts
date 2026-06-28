@@ -34,11 +34,6 @@ export function resolveWorkspaceDir(): string {
   return resolveHomeAwarePath(configured || join(resolveGatewayHome(), 'workspace'));
 }
 
-/** Where POST /v1/files lands uploads, inside the agent's workspace. */
-export function resolveUploadsDir(): string {
-  return join(resolveWorkspaceDir(), 'uploads');
-}
-
 export function ensureGatewayStateDirs(): void {
   mkdirSync(resolveGatewayLogsDir(), { recursive: true });
   mkdirSync(resolveWorkspaceDir(), { recursive: true });

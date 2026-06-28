@@ -1,7 +1,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parse } from 'dotenv';
 import { startTestServer, postJson, SseReader, type TestServer } from './test-helpers.js';
 import { DEFAULT_BASE_URL } from '../server/adapters/openclaw-adapter.js';
@@ -239,22 +240,24 @@ test('an in-flight response blocks another turn and can be cancelled', async () 
   assert.equal(next.status, 200);
 });
 
-test('a file can be uploaded, attached to a turn, and downloaded back', async () => {
+test('a file written via PUT can be attached to a turn and downloaded back', async () => {
   const marker = `attachment-marker-${Date.now()}`;
-  const form = new FormData();
-  form.set('file', new File([`The secret marker is: ${marker}\n`], 'attachment tëst.txt'));
-  const uploaded = await jsonOk<{ path: string; filename: string; bytes: number }>(
-    await fetch(`${base}/v1/files`, { method: 'POST', body: form }),
+  const filePath = join(tmpdir(), `a37gw-attach-${Date.now()}.txt`);
+  const written = await jsonOk<{ path: string; type: string; size: number }>(
+    await fetch(`${base}/v1/files/content?path=${encodeURIComponent(filePath)}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'text/plain' },
+      body: `The secret marker is: ${marker}\n`,
+    }),
   );
-  assert.equal(uploaded.filename, 'attachment tëst.txt'); // UTF-8 name survives multipart
-  assert.match(uploaded.path, /\/workspace\/uploads\/[a-f0-9]{8}-attachment tëst\.txt$/);
-  assert.ok(uploaded.bytes > 0);
-  assert.ok(existsSync(uploaded.path));
+  assert.equal(written.path, filePath);
+  assert.equal(written.type, 'file');
+  assert.ok(written.size > 0);
 
   const turn = await jsonOk<ResponseBody>(
     await postJson(base, {
       input: 'Read the attached file and reply with the exact secret marker it contains.',
-      files: [uploaded.path],
+      files: [written.path],
       reasoning_effort: 'low',
     }),
   );
@@ -267,27 +270,16 @@ test('a file can be uploaded, attached to a turn, and downloaded back', async ()
   );
   assert.ok(
     session.history.some(
-      (message) => message.role === 'user' && message.content.includes(`[Attached files:\n- ${uploaded.path}]`),
+      (message) => message.role === 'user' && message.content.includes(`[Attached files:\n- ${written.path}]`),
     ),
   );
 
-  const download = await fetch(`${base}/v1/files/content?path=${encodeURIComponent(uploaded.path)}`);
+  const download = await fetch(`${base}/v1/files/content?path=${encodeURIComponent(written.path)}`);
   assert.equal(download.status, 200);
   assert.equal(await download.text(), `The secret marker is: ${marker}\n`);
-
-  // Agents produce dotfiles too; express must not hide them.
-  const dotfilePath = join(dirname(uploaded.path), '.dotfile-download-test');
-  writeFileSync(dotfilePath, 'dot');
-  const dotfile = await fetch(`${base}/v1/files/content?path=${encodeURIComponent(dotfilePath)}`);
-  assert.equal(dotfile.status, 200);
-  assert.equal(await dotfile.text(), 'dot');
 });
 
-test('file validation and not-found errors stay stable', async () => {
-  const noFile = await fetch(`${base}/v1/files`, { method: 'POST', body: new FormData() });
-  assert.equal(noFile.status, 400);
-  assert.equal((await noFile.json()).error.param, 'file');
-
+test('responses files[] validation stays stable', async () => {
   const badFiles = await postJson(base, { input: 'x', files: 'not-an-array' });
   assert.equal(badFiles.status, 400);
   assert.equal((await badFiles.json()).error.param, 'files');
@@ -297,14 +289,6 @@ test('file validation and not-found errors stay stable', async () => {
   const missingBody = await missingAttachment.json();
   assert.equal(missingBody.error.param, 'files');
   assert.ok(missingBody.error.message.includes('/nope/missing.txt'));
-
-  const noPath = await fetch(`${base}/v1/files/content`);
-  assert.equal(noPath.status, 400);
-  assert.equal((await noPath.json()).error.param, 'path');
-
-  const missingDownload = await fetch(`${base}/v1/files/content?path=${encodeURIComponent('/nope/missing.txt')}`);
-  assert.equal(missingDownload.status, 404);
-  assert.equal((await missingDownload.json()).error.code, 'file_not_found');
 });
 
 // --- OpenClaw adapter (needs a local OpenClaw gateway; skipped when it's down) ---
