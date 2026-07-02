@@ -893,18 +893,21 @@ def _normalize_fallback_entry(raw: Any) -> dict[str, Any] | None:
     }
 
 
-def _fallback_model(cfg: dict[str, Any]) -> dict[str, Any] | list[dict[str, Any]] | None:
-    raw_chain = cfg.get("fallback_providers")
-    if isinstance(raw_chain, list):
-        chain = [
-            entry
-            for item in raw_chain
-            if (entry := _normalize_fallback_entry(item)) is not None
-        ]
-        if chain:
-            return chain
+def _fallback_model(cfg: dict[str, Any]) -> list[dict[str, Any]] | None:
+    try:
+        from hermes_cli.fallback_config import get_fallback_chain
 
-    return _normalize_fallback_entry(cfg.get("fallback_model"))
+        return get_fallback_chain(cfg) or None
+    except Exception:
+        pass
+
+    chain: list[dict[str, Any]] = []
+    for key in ("fallback_providers", "fallback_model"):
+        raw = cfg.get(key)
+        for item in raw if isinstance(raw, list) else [raw]:
+            if (entry := _normalize_fallback_entry(item)) is not None:
+                chain.append(entry)
+    return chain or None
 
 
 def _parse_reasoning(effort: str | None) -> dict[str, Any] | None:
