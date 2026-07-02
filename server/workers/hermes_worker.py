@@ -830,6 +830,15 @@ def _resolve_model_provider(
         provider_hint, bare_model = parsed
         return bare_model, provider_hint or config_provider, None
 
+    if config_provider_l.startswith("custom:"):
+        slug = config_provider_l[len("custom:"):]
+        for entry in _custom_providers(cfg):
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip()
+            if name and name.lower().replace(" ", "-") == slug:
+                return model_id, f"custom:{name.lower().replace(' ', '-')}", string_or_none(entry.get("base_url"))
+
     if "/" in model_id:
         prefix, bare = model_id.split("/", 1)
         prefix_normalized = prefix.lower()
