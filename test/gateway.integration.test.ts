@@ -128,9 +128,11 @@ test('responses and sessions work end-to-end through the local LLM', async () =>
 
   const session = await jsonOk<{
     id: string;
+    active_response_id: string | null;
     history: Array<{ role: string; content: string }>;
   }>(await fetch(`${base}/v1/sessions/${created.session_id}`));
   assert.equal(session.id, created.session_id);
+  assert.equal(session.active_response_id, null); // idle session
   assert.ok(session.history.some((message) => message.role === 'user' && message.content.includes(marker)));
   assert.ok(session.history.some((message) => message.role === 'assistant' && message.content.trim()));
 
@@ -221,13 +223,28 @@ test('an in-flight response blocks another turn and can be cancelled', async () 
   const responseId = created.data.id as string;
   const sessionId = created.data.session_id as string;
 
+  // While the turn runs, the session names its in_progress response — this is
+  // how a client that lost its state (reload) rediscovers and reattaches.
+  const running = await jsonOk<{ active_response_id: string | null }>(
+    await fetch(`${base}/v1/sessions/${sessionId}`),
+  );
+  assert.equal(running.active_response_id, responseId);
+
   const busy = await postJson(base, { session_id: sessionId, input: 'start another turn' });
   assert.equal(busy.status, 409);
-  assert.equal((await busy.json()).error.code, 'session_busy');
+  const busyBody = (await busy.json()) as { error: { code: string; response_id: string } };
+  assert.equal(busyBody.error.code, 'session_busy');
+  assert.equal(busyBody.error.response_id, responseId);
 
   const cancel = await fetch(`${base}/v1/responses/${responseId}/cancel`, { method: 'POST' });
   assert.equal(cancel.status, 200);
   await reader.drain(); // the in-flight stream ends once the turn is cancelled
+
+  // Terminal turn: the session lock is released and active_response_id nulls.
+  const settled = await jsonOk<{ active_response_id: string | null }>(
+    await fetch(`${base}/v1/sessions/${sessionId}`),
+  );
+  assert.equal(settled.active_response_id, null);
 
   // Reconnecting replays the now-terminal turn and closes immediately.
   const replay = await new SseReader(

@@ -48,6 +48,8 @@ export interface ApiError {
   message: string;
   param?: string;
   hint?: string;
+  /** On `session_busy`: the id of the response already running on the session. */
+  response_id?: string;
 }
 
 // ---------------------------------------------------------------------------
