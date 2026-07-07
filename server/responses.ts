@@ -66,7 +66,8 @@ export function beginResponse(req: ResponseRequest): BegunResponse {
   const sessionId = req.sessionId ?? newSessionId();
   const agent = req.agent;
 
-  if (activeResponseForSession(sessionId)) throw sessionBusy();
+  const activeResponseId = activeResponseForSession(sessionId);
+  if (activeResponseId) throw sessionBusy(activeResponseId);
 
   const responseId = newResponseId();
   insertResponse({

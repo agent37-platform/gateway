@@ -188,14 +188,31 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 | Reconnect a dropped stream | `GET /v1/responses/{id}/stream` (replays a snapshot, then resumes live) |
 | Cancel a running turn | `POST /v1/responses/{id}/cancel` |
 
+Lost the id (page reload, new device)? `GET /v1/sessions/{id}` returns the
+running response as `active_response_id`.
+
 ### Sessions
 
 | Action | Endpoint |
 | --- | --- |
 | List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw`; native backend fields pass through) |
-| Retrieve, with history | `GET /v1/sessions/{id}` (`?agent=` to pick the harness) |
+| Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history }` (`?agent=` to pick the harness) |
 | Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store. Hermes only (titles are length-capped and must be unique — a clash is `409 title_conflict`); harnesses without an editable title answer `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |
+
+`active_response_id` is the id of the `in_progress` response on the session, or
+null when it is idle. Harnesses persist a turn's messages at turn end, so while
+`active_response_id` is set the running turn is normally **not** in `history`
+yet — follow it live with `GET /v1/responses/{id}/stream`. This is how a client
+that lost its state (page reload, new device) rediscovers and reattaches to a
+running turn. Two timing edges to code for: right at turn end, one read can
+briefly show the finished turn in `history` **and** its id still in
+`active_response_id` — reattaching is still correct, the finished run's replay
+just ends immediately. And once it reads null the transcript is complete, with
+one exception: a **cancelled** OpenClaw turn is persisted by OpenClaw on its own
+schedule and can surface in `history` shortly after. If the harness history
+read fails (the route errors), a running turn stays discoverable: the error
+body carries its id as `error.response_id`.
 
 ### Files
 
@@ -322,7 +339,7 @@ Every error returns a stable, machine-readable body. Branch on `code`, show
 | `response_not_found` | 404 | No response with that id. |
 | `file_not_found` | 404 | No file at that path. |
 | `not_found` | 404 | Unknown route. |
-| `session_busy` | 409 | A response is already running on the session. |
+| `session_busy` | 409 | A response is already running on the session. On the 409, `error.response_id` names it — reattach via `GET /v1/responses/{id}/stream` or cancel it. (Treat the field as optional: a rare gateway/harness race surfaces this code as a failed response without it.) |
 | `title_conflict` | 409 | The requested session title is already in use by another session. |
 | `file_exists` | 409 | `PUT /v1/files/content?overwrite=false` and the file already exists. |
 | `modified` | 412 | `PUT /v1/files/content`'s `X-Expected-Mtime` no longer matches the file. |
@@ -335,7 +352,8 @@ Every error returns a stable, machine-readable body. Branch on `code`, show
 
 Agent/worker failures surface their own `code` and `hint` where available (e.g.
 `auth_error`, `quota_exhausted`, `model_error`). One response runs at a time per
-session; sending a new turn while one is in flight returns `409 session_busy`.
+session; sending a new turn while one is in flight returns `409 session_busy`,
+normally with the running response's id in `error.response_id`.
 
 ## Testing
 

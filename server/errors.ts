@@ -10,12 +10,13 @@ export class GatewayError extends Error {
   readonly code: string;
   readonly param?: string;
   readonly hint?: string;
+  readonly responseId?: string;
 
   constructor(
     status: number,
     code: string,
     message: string,
-    options?: { param?: string; hint?: string },
+    options?: { param?: string; hint?: string; responseId?: string },
   ) {
     super(message);
     this.name = 'GatewayError';
@@ -23,12 +24,14 @@ export class GatewayError extends Error {
     this.code = code;
     this.param = options?.param;
     this.hint = options?.hint;
+    this.responseId = options?.responseId;
   }
 
   toBody(): { error: ApiError } {
     const error: ApiError = { code: this.code, message: this.message };
     if (this.param) error.param = this.param;
     if (this.hint) error.hint = this.hint;
+    if (this.responseId) error.response_id = this.responseId;
     return { error };
   }
 }
@@ -84,9 +87,10 @@ export function fileModified(path: string): GatewayError {
   });
 }
 
-export function sessionBusy(): GatewayError {
+export function sessionBusy(responseId?: string): GatewayError {
   return new GatewayError(409, 'session_busy', 'A response is already running on this session.', {
-    hint: 'Cancel the running response, or start another session.',
+    hint: 'Reattach with GET /v1/responses/{response_id}/stream, cancel it, or start another session.',
+    responseId,
   });
 }
 
