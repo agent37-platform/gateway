@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { AgentType, SessionMessage } from '../../shared/types.js';
 import { getAdapter, agentFromQuery } from '../agent.js';
-import { GatewayError, gatewayErrorFromWorker, renameUnsupported, validationError } from '../errors.js';
+import { gatewayErrorFromWorker, renameUnsupported, validationError } from '../errors.js';
 import { activeResponseForSession } from '../live-runs.js';
 
 export const sessionsRouter = Router();
@@ -23,13 +23,7 @@ sessionsRouter.get('/', async (req, res, next) => {
 // GET /v1/sessions/:id?agent= — the session's transcript, projected from the
 // harness. An unknown id projects to empty history rather than 404 — the harness
 // owns existence. `active_response_id` names the in_progress response on the
-// session (null when idle): harnesses persist a turn's rows at turn end, so
-// while it is set the running turn is normally not in `history` yet — follow it
-// via GET /v1/responses/{id}/stream. The two reads aren't atomic: right at turn
-// end one response can briefly show the finished turn in `history` AND its id
-// still set — reattaching is still correct (a finished run's replay ends
-// immediately). Null means the transcript is complete, except a cancelled
-// OpenClaw turn, which OpenClaw persists on its own schedule shortly after.
+// session (null when idle); follow it via GET /v1/responses/{id}/stream.
 sessionsRouter.get('/:id', async (req, res, next) => {
   let agent: AgentType | undefined;
   try {
@@ -50,20 +44,7 @@ sessionsRouter.get('/:id', async (req, res, next) => {
       history,
     });
   } catch (error) {
-    // The run registry is local and healthy even when the harness read fails —
-    // keep the running response discoverable (error.response_id) so a client
-    // can still reattach or cancel while history is unavailable.
-    const err = gatewayErrorFromWorker(error, 'Session history unavailable', agent);
-    const active = activeResponseForSession(req.params.id);
-    next(
-      active
-        ? new GatewayError(err.status, err.code, err.message, {
-            param: err.param,
-            hint: err.hint,
-            responseId: active,
-          })
-        : err,
-    );
+    next(gatewayErrorFromWorker(error, 'Session history unavailable', agent));
   }
 });
 
