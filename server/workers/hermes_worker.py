@@ -880,6 +880,33 @@ def _resolve_toolsets(cfg: dict[str, Any]) -> list[str] | None:
     return None
 
 
+_mcp_servers_registered = False
+
+
+def _register_mcp_servers(cfg: dict[str, Any]) -> None:
+    """Register config.yaml's ``mcp_servers`` into the Hermes tool registry.
+
+    Only the Hermes CLI/web entrypoints do this at startup — nothing in the
+    worker path does — so without it a configured MCP server resolves into the
+    session's toolsets (_resolve_toolsets) yet contributes zero tools to the
+    LLM. One attempt per process: a server that fails to connect is parked by
+    Hermes and revived by its between-turns refresh, never blocking again here.
+    """
+    global _mcp_servers_registered
+    if _mcp_servers_registered:
+        return
+    servers = cfg.get("mcp_servers")
+    if not isinstance(servers, dict) or not servers:
+        return
+    _mcp_servers_registered = True
+    try:
+        from tools.mcp_tool import register_mcp_servers
+
+        register_mcp_servers(servers)
+    except Exception:
+        pass
+
+
 def _normalize_fallback_entry(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -935,6 +962,7 @@ def _create_agent(
 ) -> Any:
     _ensure_imports()
     cfg = _load_config()
+    _register_mcp_servers(cfg)
     defaults = _defaults_from_config(cfg)
     resolved_reasoning_effort = reasoning_effort or defaults.get("reasoningEffort")
     resolved_model, resolved_provider, resolved_base_url = _resolve_model_provider(
