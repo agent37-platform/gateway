@@ -889,8 +889,12 @@ def _register_mcp_servers(cfg: dict[str, Any]) -> None:
     Only the Hermes CLI/web entrypoints do this at startup — nothing in the
     worker path does — so without it a configured MCP server resolves into the
     session's toolsets (_resolve_toolsets) yet contributes zero tools to the
-    LLM. One attempt per process: a server that fails to connect is parked by
-    Hermes and revived by its between-turns refresh, never blocking again here.
+    LLM. A server that connects and later drops is parked and revived by
+    Hermes itself; but if registration RAISES (import failure, endpoint down
+    before any connection — common when the backend sits behind a dev tunnel),
+    nothing inside Hermes will retry it, so we keep the flag unset and try
+    again on the next agent create. register_mcp_servers is idempotent for
+    already-connected servers, so post-success retries would be near-free too.
     """
     global _mcp_servers_registered
     if _mcp_servers_registered:
@@ -898,13 +902,18 @@ def _register_mcp_servers(cfg: dict[str, Any]) -> None:
     servers = cfg.get("mcp_servers")
     if not isinstance(servers, dict) or not servers:
         return
-    _mcp_servers_registered = True
     try:
         from tools.mcp_tool import register_mcp_servers
 
         register_mcp_servers(servers)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(
+            f"[hermes-worker] mcp_servers registration failed (will retry on next agent create): {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    _mcp_servers_registered = True
 
 
 def _normalize_fallback_entry(raw: Any) -> dict[str, Any] | None:
