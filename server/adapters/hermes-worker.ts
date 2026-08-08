@@ -331,6 +331,9 @@ class HermesWorkerClient {
         ...process.env,
         HERMES_QUIET: '1',
         HERMES_YOLO_MODE: '1',
+        // Hermes only registers the agent-facing `cronjob` tool (self-scheduling
+        // via chat) when the process declares itself a gateway session.
+        HERMES_GATEWAY_SESSION: '1',
       },
     });
 
