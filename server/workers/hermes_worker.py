@@ -64,6 +64,27 @@ ACTIVE_TASKS_LOCK = threading.Lock()
 DEFAULT_INTERRUPT_REASON = "Stopped by user"
 
 ALLOWED_REASONING = {"none", "minimal", "low", "medium", "high", "xhigh"}
+
+# Hermes ships an interactive `clarify` tool that blocks the agent loop until a
+# human answers inside the same turn (CLI arrow keys, Telegram buttons). The
+# gateway is a turn-based HTTP API: the caller reads the response and replies
+# on the same session, so the right way to ask is to end the turn with the
+# question as the response. Expose no clarify tool at all (Hermes' own
+# api_server posture, and what cron / delegate children do) rather than a
+# canned callback that tells the model to guess.
+DISABLED_TOOLSETS = ["clarify"]
+
+# Appended to the system prompt at API-call time only (never stored in the
+# session), so it also reaches sessions created before this hint existed.
+GATEWAY_PLATFORM_HINT = (
+    "You are working through the Agent37 gateway, a turn-based API: the person "
+    "you are working for reads your final response and can reply in the next "
+    "turn. There is no interactive clarify tool. When you need a decision or "
+    "information only they can give, and the choice has real trade-offs, stop "
+    "and ask: make the question (and the options, if any) your response, then "
+    "end the turn and wait for their reply. Do not silently pick a branch and "
+    "keep going. Low-stakes ambiguity: choose a sensible default and say so."
+)
 KNOWN_PROVIDER_PREFIXES = {
     "anthropic",
     "openai",
@@ -1016,12 +1037,6 @@ def _create_agent(
     if not resolved_base_url:
         resolved_base_url = string_or_none(runtime.get("base_url"))
 
-    def clarify_callback(question: Any, choices: Any = None) -> str:
-        return (
-            "The user is not available for an interactive clarification right now. "
-            "Make a reasonable assumption, proceed, and call out the assumption in the response if it matters."
-        )
-
     session_db = None
     if _SessionDB is not None:
         try:
@@ -1041,9 +1056,10 @@ def _create_agent(
         "session_id": session_id,
         "session_db": session_db,
         "enabled_toolsets": _resolve_toolsets(cfg),
+        "disabled_toolsets": list(DISABLED_TOOLSETS),
         "fallback_model": _fallback_model(cfg),
-        "clarify_callback": clarify_callback,
         "max_iterations": _max_iterations(cfg),
+        "ephemeral_system_prompt": GATEWAY_PLATFORM_HINT,
     }
     if callbacks:
         agent_kwargs.update(callbacks)
