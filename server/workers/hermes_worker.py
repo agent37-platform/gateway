@@ -1387,13 +1387,20 @@ def _run_chat(request_id: str, request: dict[str, Any]) -> None:
         return
 
     final_text = str(result.get("final_response") or "")
-    if result.get("failed") and not final_text:
-        # The agent's run loop aborted (e.g. every provider call was refused)
-        # without producing a reply. Surface it as an error instead of letting
-        # the turn settle as an empty success.
-        error_text = str(result.get("error") or "") or "The agent run failed without producing a response."
+    if result.get("failed"):
+        # The agent's run loop aborted (every provider call refused, billing
+        # wall, ...). Hermes' explicit `failed` flag is the signal: newer
+        # versions also fill final_response with the failure prose ("Billing or
+        # credits exhausted: HTTP 402 ..."), which must not settle the turn as
+        # a completed reply.
+        error_text = (
+            str(result.get("error") or "")
+            or final_text
+            or "The agent run failed without producing a response."
+        )
         payload = _error_payload(RuntimeError(error_text))
-        raise WorkerError(error_text, code=payload["code"], hint=payload.get("hint"))
+        code = payload["code"] if payload["code"] != "worker_error" else "provider_error"
+        raise WorkerError(error_text, code=code, hint=payload.get("hint"))
 
     failure_message = _agent_failure_message(final_text)
     if failure_message:
