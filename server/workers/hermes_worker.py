@@ -48,6 +48,11 @@ PROTOCOL_LOCK = threading.Lock()
 # Keep in sync with GOAL_MAX_TURNS in shared/types.ts.
 GOAL_MAX_TURNS = 20
 
+# Tool-calling ceiling for one turn when config.yaml does not set agent.max_turns.
+# Matches the default Hermes' own gateway uses; the AIAgent signature default is 90,
+# which is low for multi-phase agent work that delegates to subagents.
+DEFAULT_MAX_ITERATIONS = int(os.environ.get("HERMES_MAX_ITERATIONS", "500"))
+
 # Cap on concurrent AIAgent.run_conversation calls.
 AGENT_RUN_LIMIT = int(os.environ.get("HERMES_AGENT_RUN_LIMIT", "10"))
 AGENT_SEMAPHORE = threading.BoundedSemaphore(AGENT_RUN_LIMIT)
@@ -867,6 +872,22 @@ def _resolve_model_provider(
     return model_id, config_provider, config_base_url
 
 
+def _max_iterations(cfg: dict[str, Any]) -> int:
+    """Tool-calling ceiling for one turn, from ``agent.max_turns``.
+
+    Hermes' own gateway reads the same key and falls back to 500. This worker passed
+    nothing, so every turn used the ``AIAgent`` signature default of 90 and no
+    instance-side config could raise it.
+    """
+    agent_cfg = cfg.get("agent")
+    raw = agent_cfg.get("max_turns") if isinstance(agent_cfg, dict) else None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_ITERATIONS
+    return value if value > 0 else DEFAULT_MAX_ITERATIONS
+
+
 def _resolve_toolsets(cfg: dict[str, Any]) -> list[str] | None:
     try:
         from hermes_cli.tools_config import _get_platform_tools
@@ -1026,6 +1047,7 @@ def _create_agent(
         "enabled_toolsets": _resolve_toolsets(cfg),
         "fallback_model": _fallback_model(cfg),
         "clarify_callback": clarify_callback,
+        "max_iterations": _max_iterations(cfg),
     }
     if callbacks:
         agent_kwargs.update(callbacks)
