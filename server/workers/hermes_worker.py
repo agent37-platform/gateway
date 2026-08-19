@@ -83,7 +83,10 @@ GATEWAY_PLATFORM_HINT = (
     "information only they can give, and the choice has real trade-offs, stop "
     "and ask: make the question (and the options, if any) your response, then "
     "end the turn and wait for their reply. Do not silently pick a branch and "
-    "keep going. Low-stakes ambiguity: choose a sensible default and say so."
+    "keep going. Low-stakes ambiguity: choose a sensible default and say so. "
+    "If you dispatched background work (a delegated subagent, a watched "
+    "process), its result is delivered to you at the start of a later turn, "
+    "so end your turn instead of waiting or polling for it."
 )
 KNOWN_PROVIDER_PREFIXES = {
     "anthropic",
@@ -1274,6 +1277,55 @@ def _usage_from_result(result: dict[str, Any]) -> dict[str, Any]:
     return usage
 
 
+def _drain_async_completions(session_id: str) -> list[str]:
+    """Collect background-completion notifications owed to this session.
+
+    Hermes parks finished background work (delegate_task children, terminal
+    notify_on_complete / watch_patterns events) on
+    ``process_registry.completion_queue`` and relies on the platform loop to
+    hand it to the model: the CLI drains the queue before each prompt, the
+    Hermes daemon self-posts a wake turn. This worker IS the platform loop for
+    gateway sessions, so drain here before each turn; without it a delegation
+    completion sits undelivered forever (``delivery_state='pending'``,
+    ``delivery_attempts=0``) and the parent never hears from its children.
+
+    Ownership is plain session-key equality: delegate_task stamps the batch
+    with ``get_current_session_key()``, which our ``set_session_vars`` binding
+    makes the gateway session id. Claim/complete mirrors the CLI's
+    ``_drain_process_notifications`` so a completion restored into several
+    worker processes is still delivered exactly once. Rows finished before a
+    worker restart re-enter the queue via ``ProcessRegistry.__init__``.
+    """
+    try:
+        from tools.process_registry import process_registry
+        from tools.async_delegation import (
+            claim_event_delivery,
+            complete_event_delivery,
+        )
+    except Exception:
+        return []
+    try:
+        pairs = process_registry.drain_notifications(
+            session_key=session_id, skip_poll_observed=False
+        )
+    except Exception:
+        return []
+    texts: list[str] = []
+    for evt, text in pairs:
+        try:
+            claim = claim_event_delivery(evt, f"agent37-gateway:{session_id}")
+        except Exception:
+            continue
+        if claim is None:
+            continue  # another consumer already claimed this delivery
+        texts.append(text)
+        try:
+            complete_event_delivery(evt, claim)
+        except Exception:
+            pass
+    return texts
+
+
 def _run_chat(request_id: str, request: dict[str, Any]) -> None:
     settings = request.get("settings") if isinstance(request.get("settings"), dict) else {}
     requested_model = string_or_none(settings.get("model"))
@@ -1287,6 +1339,13 @@ def _run_chat(request_id: str, request: dict[str, Any]) -> None:
 
     session_db, session_id = open_session(session_id)
     history = load_agent_history(session_db, session_id)
+
+    # Deliver any finished background work (subagent results, watched-process
+    # notifications) owed to this session by prepending it to the turn's
+    # message, the turn-based equivalent of the CLI's pre-prompt drain.
+    notifications = _drain_async_completions(session_id)
+    if notifications:
+        message = "\n\n".join([*notifications, message])
     system_message = request.get("systemMessage")
     if not isinstance(system_message, str):
         system_message = None
