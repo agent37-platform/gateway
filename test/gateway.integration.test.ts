@@ -340,7 +340,7 @@ test('openclaw responses complete, stream, and stay on one session', { skip: ope
   assert.equal(recalled.session_id, created.session_id);
   assert.ok(recalled.output_text.includes(marker));
 
-  // History reads back through OpenClaw's GET /sessions/{key}/history. The
+  // History projects OpenClaw's own transcript (WS sessions.get). The
   // session lives on OpenClaw, so the read must name `?agent=openclaw` — the
   // gateway keeps no index to infer it from.
   const session = await jsonOk<{ history: { role: string; content: string }[] }>(
@@ -349,28 +349,44 @@ test('openclaw responses complete, stream, and stay on one session', { skip: ope
   assert.ok(session.history.some((m) => m.role === 'user' && m.content.includes(marker)));
   assert.ok(session.history.some((m) => m.role === 'assistant' && m.content.includes(marker)));
 
-  // OpenClaw has no list API over HTTP, so the adapter shells out to the
-  // `openclaw` CLI and surfaces each `openresponses-user:{user}` session under
-  // the `id` it reads back with — so the created session shows up here.
+  // The list is OpenClaw's own (WS sessions.list); the adapter surfaces each
+  // `openresponses-user:{user}` session under the `id` it reads back with — so
+  // the created session shows up here.
   const list = await jsonOk<{ agent: string; data: Array<{ id: string }> }>(
     await fetch(`${base}/v1/sessions?agent=openclaw`),
   );
   assert.equal(list.agent, 'openclaw');
   assert.ok(list.data.some((s) => s.id === created.session_id));
 
-  // OpenClaw stores no round-trippable session title, so rename is a 405 rather
-  // than a gateway-side name the read paths couldn't surface.
-  const rename = await fetch(`${base}/v1/sessions/${created.session_id}?agent=openclaw`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: 'nope' }),
-  });
-  assert.equal(rename.status, 405);
-  assert.equal(((await rename.json()) as { error: { code: string } }).error.code, 'rename_unsupported');
+  // Rename writes the session's label into OpenClaw's own store and reads
+  // back on the list. Labels are unique in OpenClaw, so the name carries the
+  // marker to survive leftovers from earlier aborted runs.
+  const title = `integration-rename-${marker}`;
+  const rename = await jsonOk<{ renamed: boolean }>(
+    await fetch(`${base}/v1/sessions/${created.session_id}?agent=openclaw`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    }),
+  );
+  assert.equal(rename.renamed, true);
+  const renamedList = await jsonOk<{ data: Array<{ id: string; label?: string }> }>(
+    await fetch(`${base}/v1/sessions?agent=openclaw`),
+  );
+  assert.equal(renamedList.data.find((s) => s.id === created.session_id)?.label, title);
+
+  // The model catalog lists OpenClaw's real LLM choices, not agent targets.
+  const models = await jsonOk<{ data: Array<{ id: string; owned_by: string }> }>(
+    await fetch(`${base}/v1/models?agent=openclaw`),
+  );
+  assert.ok(models.data.length > 0);
+  assert.ok(models.data.every((m) => m.id !== 'openclaw' && m.owned_by.length > 0));
 
   const stream = await postJson(base, {
     agent: 'openclaw',
-    input: 'Reply with one short sentence.',
+    // A bare meta-instruction can draw OpenClaw's NO_REPLY silence token;
+    // demanding a literal word always streams text.
+    input: 'Reply with exactly this word: PONG',
     stream: true,
   });
   assert.equal(stream.status, 200);
@@ -378,6 +394,17 @@ test('openclaw responses complete, stream, and stay on one session', { skip: ope
   assert.equal(events[0]?.event, 'response.created');
   assert.ok(events.some((event) => event.event === 'response.output_text.delta'));
   assert.equal(events.at(-1)?.event, 'response.completed');
+
+  // Delete removes the session from OpenClaw's store (transcript archived
+  // off the active path) and it disappears from the list.
+  const deleted = await jsonOk<{ deleted: boolean }>(
+    await fetch(`${base}/v1/sessions/${created.session_id}?agent=openclaw`, { method: 'DELETE' }),
+  );
+  assert.equal(deleted.deleted, true);
+  const afterDelete = await jsonOk<{ data: Array<{ id: string }> }>(
+    await fetch(`${base}/v1/sessions?agent=openclaw`),
+  );
+  assert.ok(!afterDelete.data.some((s) => s.id === created.session_id));
 });
 
 test('an in-flight openclaw turn can be cancelled', { skip: openclawSkip }, async () => {

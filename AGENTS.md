@@ -30,7 +30,7 @@ npm run typecheck && npm test
 
 Both must pass. Never open a PR on a red or un-run suite — fix the code (or the test) first.
 
-The OpenClaw tests in the suite auto-skip when no local OpenClaw gateway is running. If your change touches the OpenClaw adapter or routing, start OpenClaw locally (`openclaw start`, port 18789) so those tests actually run. The adapter also needs two things set up from `~/.openclaw/openclaw.json`: the responses endpoint enabled (`gateway.http.endpoints.responses.enabled: true`) and that file's `gateway.auth.token` copied into `OPENCLAW_TOKEN` in your `.env`. See "Set up OpenClaw" in `README.md` for the exact steps.
+The OpenClaw tests in the suite auto-skip when no local OpenClaw gateway is running. If your change touches the OpenClaw adapter or routing, start OpenClaw locally (`openclaw start`, port 18789) so those tests actually run. The adapter speaks OpenClaw's WebSocket gateway RPC and needs one thing from `~/.openclaw/openclaw.json`: its `gateway.auth.token` copied into `OPENCLAW_TOKEN` in your `.env`. See "Set up OpenClaw" in `README.md`.
 
 ## Releases
 

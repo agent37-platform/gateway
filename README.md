@@ -47,49 +47,41 @@ State is split deliberately:
 
 ## How it talks to OpenClaw
 
-The OpenClaw adapter is plain HTTP: it forwards turns to OpenClaw's own gateway
-(`POST /v1/responses`, OpenResponses-compatible) at `OPENCLAW_BASE_URL`
-(defaults to a local OpenClaw, `http://localhost:18789`, when unset),
-authenticated with `OPENCLAW_TOKEN`.
+The OpenClaw adapter speaks OpenClaw's WebSocket gateway RPC — OpenClaw's
+native API, the one its own UI and CLI use — at `OPENCLAW_BASE_URL` (defaults
+to a local OpenClaw, `http://localhost:18789`, when unset; the adapter derives
+`ws://` from it), authenticated with `OPENCLAW_TOKEN`.
 
-Session history reads through OpenClaw's `GET /sessions/{key}/history`, where the
-key is `openresponses-user:{user}` — OpenClaw stores each turn under the `user`
-we send (the gateway session id) and resolves that partial key to the full
-session. `GET /v1/sessions/{id}` projects that transcript. OpenClaw exposes no
-HTTP route to delete a stored transcript, so `DELETE /v1/sessions/{id}` reports
-`deleted: false` and OpenClaw keeps its copy; likewise there is no cancel API, so
-cancel aborts the gateway-side stream only (OpenClaw may keep working
-server-side). It also has no round-trippable session title, so
-`PATCH /v1/sessions/{id}` (rename) answers `405 rename_unsupported` rather than
-keeping a gateway-side name the read paths couldn't surface.
+Turns go through `chat.send` and stream back over OpenClaw's `chat`/`agent`
+events, so the gateway relays text deltas, thinking, and tool activity, and
+cancel is real (`chat.abort` stops the run inside OpenClaw). Each session is
+keyed `openresponses-user:{user}` under OpenClaw's default agent, where `user`
+is the gateway session id. `GET /v1/sessions/{id}` projects the transcript
+(`sessions.get`), the session list is OpenClaw's own (`sessions.list`),
+`DELETE /v1/sessions/{id}` removes the session (`sessions.delete`; OpenClaw
+archives the transcript off its active path), and `PATCH /v1/sessions/{id}`
+(rename) writes the session's label (`sessions.patch`).
+
+`GET /v1/models` lists OpenClaw's configured LLM catalog (`models.list`) as
+`provider/model` ids. A turn that names a `model` applies it to the session
+(`sessions.patch`) — set when chosen, never cleared, so a model picked through
+OpenClaw's own surfaces isn't clobbered by turns that don't choose — and
+`reasoning_effort` maps onto OpenClaw's per-turn thinking level
+(`none|minimal|low|medium|high|xhigh` → `off|minimal|low|medium|high|xhigh`).
 
 ### Set up OpenClaw
 
-Two steps, both reading from your `~/.openclaw/openclaw.json`:
+One step: copy `gateway.auth.token` from `~/.openclaw/openclaw.json` into
+`OPENCLAW_TOKEN` in your `.env`:
 
-1. **Enable the responses endpoint.** Add an `http` block under `gateway` in
-   `~/.openclaw/openclaw.json`, then restart OpenClaw:
-
-   ```jsonc
-   "gateway": {
-     // …your existing config…
-     "http": {
-       "endpoints": {
-         "responses": { "enabled": true }
-       }
-     }
-   }
-   ```
-
-2. **Set the token.** Copy `gateway.auth.token` from that same file into
-   `OPENCLAW_TOKEN` in your `.env`:
-
-   ```bash
-   OPENCLAW_TOKEN=<gateway.auth.token from openclaw.json>
-   ```
+```bash
+OPENCLAW_TOKEN=<gateway.auth.token from openclaw.json>
+```
 
 Then route any turn to it with `"agent": "openclaw"`. If OpenClaw runs somewhere
-other than `http://localhost:18789`, set `OPENCLAW_BASE_URL` too.
+other than `http://localhost:18789`, set `OPENCLAW_BASE_URL` too. No OpenClaw
+config changes are needed — the WebSocket gateway is OpenClaw's always-on
+native surface.
 
 ## Quickstart
 
@@ -197,7 +189,7 @@ running response as `active_response_id`.
 | --- | --- |
 | List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw`; native backend fields pass through) |
 | Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history }` (`?agent=` to pick the harness) |
-| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store. Hermes only (titles are length-capped and must be unique — a clash is `409 title_conflict`); harnesses without an editable title answer `405 rename_unsupported`. |
+| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label). A harness without an editable title answers `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |
 
 `active_response_id` is the id of the `in_progress` response on the session, or

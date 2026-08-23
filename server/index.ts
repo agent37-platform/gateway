@@ -2,7 +2,7 @@ import 'dotenv/config';
 import './logging.js';
 import { createServer, type Server } from 'node:http';
 import app from './app.js';
-import { adapter } from './agent.js';
+import { adapter, getAdapter } from './agent.js';
 import { shutdownLiveRuns } from './live-runs.js';
 import { shutdownResponseStore } from './response-store.js';
 import { ensureGatewayStateDirs } from './paths.js';
@@ -91,7 +91,11 @@ async function shutdown(reason: ShutdownReason, exitCode = 0): Promise<void> {
 
   shutdownLiveRuns();
   shutdownResponseStore();
-  const results = await Promise.allSettled([closeHttpServer(), adapter.stop?.() ?? Promise.resolve()]);
+  const results = await Promise.allSettled([
+    closeHttpServer(),
+    adapter.stop?.() ?? Promise.resolve(),
+    getAdapter('openclaw').stop?.() ?? Promise.resolve(),
+  ]);
   for (const result of results) {
     if (result.status === 'rejected') console.error(result.reason);
   }
