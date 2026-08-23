@@ -41,7 +41,7 @@ function baseUrl(): string {
 
 function wsUrl(): string {
   const url = new URL(baseUrl().replace(/^http/, 'ws'));
-  const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname);
+  const loopback = ['localhost', '::1', '[::1]'].includes(url.hostname) || url.hostname.startsWith('127.');
   if (url.protocol === 'ws:' && !loopback) {
     // Mirrors OpenClaw's own client policy: the shared token never rides
     // plaintext off the local machine.
