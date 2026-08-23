@@ -352,9 +352,10 @@ export class OpenClawAdapter implements AgentAdapter {
       usage.totalTokens ?? (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
     if (used <= 0) return null;
     try {
-      const entry = (await this.cachedModels()).find(
-        (m) => m.available !== false && bareModelId(m.id) === bareModelId(model),
-      );
+      const catalog = await this.cachedModels();
+      const entry =
+        catalog.find((m) => m.available !== false && bareModelId(m.id) === bareModelId(model)) ??
+        catalog.find((m) => bareModelId(m.id) === bareModelId(model));
       if (!entry) return null;
       const window =
         entry.contextWindow && entry.contextWindow > 0 ? entry.contextWindow : OPENCLAW_DEFAULT_CONTEXT_WINDOW;
@@ -471,7 +472,11 @@ export class OpenClawAdapter implements AgentAdapter {
     const models = await this.fetchModels();
     const byProvider = new Map<string, AgentModelOption[]>();
     for (const model of models) {
-      if (model.available === false) continue;
+      // No `available` filter: the catalog view already restricts to configured
+      // providers plus providers with credentials, and `available: false` also
+      // marks OAuth logins whose access token lapsed between turns — the
+      // runtime refreshes those on send, so dropping them hides connected
+      // subscriptions (ChatGPT/Claude/Grok) whenever they sit idle.
       const options = byProvider.get(model.provider) ?? [];
       options.push({
         id: modelRef(model.provider, model.id),
