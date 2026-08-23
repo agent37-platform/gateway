@@ -40,7 +40,14 @@ function baseUrl(): string {
 }
 
 function wsUrl(): string {
-  return baseUrl().replace(/^http/, 'ws');
+  const url = new URL(baseUrl().replace(/^http/, 'ws'));
+  const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname);
+  if (url.protocol === 'ws:' && !loopback) {
+    // Mirrors OpenClaw's own client policy: the shared token never rides
+    // plaintext off the local machine.
+    throw new Error(`OPENCLAW_BASE_URL must be https:// for remote hosts — refusing to send the OpenClaw token in cleartext to ${url.hostname}`);
+  }
+  return url.toString();
 }
 
 function sessionKeyFor(sessionId: string): string {
@@ -182,6 +189,7 @@ export class OpenClawAdapter implements AgentAdapter {
           if (dropped) throw dropped;
           await new Promise<void>((resolve) => {
             wake = resolve;
+            if (dropped) resolve();
           });
           wake = null;
           continue;
