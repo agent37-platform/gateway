@@ -5,9 +5,11 @@ import type {
   AgentModelOption,
   HermesMessage,
   SessionMetadata,
+  SessionSummary,
   TurnUsage,
 } from '../../shared/types.js';
 import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
+import { epochMillis } from './types.js';
 import { OpenClawSocket, type OpenClawEvent } from './openclaw-ws.js';
 
 // The adapter speaks OpenClaw's WebSocket gateway RPC for everything: chat
@@ -288,16 +290,24 @@ export class OpenClawAdapter implements AgentAdapter {
     }
   }
 
-  async listSessions(): Promise<Record<string, unknown>[]> {
+  async listSessions(): Promise<SessionSummary[]> {
     const result = await this.socket.request<{ sessions?: Record<string, unknown>[] }>('sessions.list', {
       limit: 1000,
     });
     // Keep the sessions this gateway created and surface the `{user}` part as
-    // `id`, so each entry round-trips to `GET /v1/sessions/:id`.
+    // `id`, so each entry round-trips to `GET /v1/sessions/:id`. OpenClaw's
+    // `label` (what rename writes) and `updatedAt` become the contract's
+    // `title`/`last_active`; it tracks no message count or preview.
     return (result.sessions ?? [])
       .filter((s): s is Record<string, unknown> & { key: string } =>
         typeof s.key === 'string' && s.key.includes(SESSION_KEY_PREFIX))
-      .map((s) => ({ ...s, id: s.key.slice(s.key.indexOf(SESSION_KEY_PREFIX) + SESSION_KEY_PREFIX.length) }));
+      .map((s) => ({
+        id: s.key.slice(s.key.indexOf(SESSION_KEY_PREFIX) + SESSION_KEY_PREFIX.length),
+        title: typeof s.label === 'string' && s.label.trim() ? s.label : null,
+        last_active: epochMillis(s.updatedAt),
+        message_count: null,
+        preview: null,
+      }));
   }
 
   private async lastAssistantUsage(sessionId: string): Promise<TurnUsage | null> {

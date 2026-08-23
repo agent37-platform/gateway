@@ -6,9 +6,11 @@ import { activeResponseForSession } from '../live-runs.js';
 
 export const sessionsRouter = Router();
 
-// GET /v1/sessions?agent= — list a harness's sessions straight from its own
-// store, native fields untouched. The harness owns the transcript and the index;
-// the gateway keeps none. Harnesses without a list API return [].
+// GET /v1/sessions?agent= — list a harness's sessions from its own store,
+// projected into the shared SessionSummary shape (id, title, last_active,
+// message_count, preview) so clients never branch on the harness. The harness
+// owns the transcript and the index; the gateway keeps none. Harnesses without
+// a list API return [].
 sessionsRouter.get('/', async (req, res, next) => {
   let agent: AgentType | undefined;
   try {

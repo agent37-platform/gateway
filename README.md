@@ -57,7 +57,8 @@ events, so the gateway relays text deltas, thinking, and tool activity, and
 cancel is real (`chat.abort` stops the run inside OpenClaw). Each session is
 keyed `openresponses-user:{user}` under OpenClaw's default agent, where `user`
 is the gateway session id. `GET /v1/sessions/{id}` projects the transcript
-(`sessions.get`), the session list is OpenClaw's own (`sessions.list`),
+(`sessions.get`), the session list projects OpenClaw's own (`sessions.list`;
+`label`/`updatedAt` become the shared `title`/`last_active`),
 `DELETE /v1/sessions/{id}` removes the session (`sessions.delete`; OpenClaw
 archives the transcript off its active path), and `PATCH /v1/sessions/{id}`
 (rename) writes the session's label (`sessions.patch`).
@@ -187,7 +188,7 @@ running response as `active_response_id`.
 
 | Action | Endpoint |
 | --- | --- |
-| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw`; native backend fields pass through) |
+| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
 | Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history }` (`?agent=` to pick the harness) |
 | Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label). A harness without an editable title answers `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |

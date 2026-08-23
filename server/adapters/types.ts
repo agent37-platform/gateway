@@ -7,10 +7,24 @@ import type {
   GoalStateSnapshot,
   HermesMessage,
   SessionMetadata,
+  SessionSummary,
   TurnUsage,
 } from '../../shared/types.js';
 
 export type { AgentRunSettings, ContextUsage };
+
+/** Coerce a harness's native timestamp (epoch seconds, epoch ms, or a date
+ *  string) to the contract's epoch milliseconds. */
+export function epochMillis(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < 1e12 ? Math.round(value * 1000) : Math.round(value);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
 
 export interface AgentRunOptions {
   /** Optional system prompt. The gateway is a thin passthrough and normally
@@ -56,9 +70,9 @@ export interface AgentAdapter {
   /** True when the backend is reachable and ready. */
   healthCheck(): Promise<boolean>;
 
-  /** The backend's own session list, native fields passed through untouched.
-   *  Backends without a list API return []. */
-  listSessions(): Promise<Record<string, unknown>[]>;
+  /** The backend's session list, projected into the shared SessionSummary
+   *  shape. Backends without a list API return []. */
+  listSessions(): Promise<SessionSummary[]>;
 
   /** Projected transcript for a session, from the backend's own store. */
   getMessages(sessionId: string): Promise<HermesMessage[]>;
