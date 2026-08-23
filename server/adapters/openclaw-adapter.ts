@@ -29,6 +29,12 @@ const SESSION_KEY_PREFIX = 'openresponses-user:';
 // How long one models.list result serves context-window lookups.
 const MODEL_CATALOG_TTL_MS = 60_000;
 
+// OpenClaw's own default window for custom-provider models (its
+// AGENT_CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW): deployed versions serve
+// models.list entries without contextWindow, but budget sessions against
+// this, so it is the session's real effective window, not a guess.
+const OPENCLAW_DEFAULT_CONTEXT_WINDOW = 128_000;
+
 // Our reasoning efforts map 1:1 onto OpenClaw thinking levels ('none' → 'off');
 // OpenClaw additionally knows max/ultra/adaptive, which we never send.
 const THINKING_MAP: Record<string, string> = {
@@ -349,9 +355,10 @@ export class OpenClawAdapter implements AgentAdapter {
       const entry = (await this.cachedModels()).find(
         (m) => m.available !== false && bareModelId(m.id) === bareModelId(model),
       );
-      return entry?.contextWindow && entry.contextWindow > 0
-        ? { used_tokens: used, window_tokens: entry.contextWindow }
-        : null;
+      if (!entry) return null;
+      const window =
+        entry.contextWindow && entry.contextWindow > 0 ? entry.contextWindow : OPENCLAW_DEFAULT_CONTEXT_WINDOW;
+      return { used_tokens: used, window_tokens: window };
     } catch {
       return null;
     }
