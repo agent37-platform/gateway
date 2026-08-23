@@ -19,7 +19,7 @@ export async function startTestServer(): Promise<TestServer> {
   process.env.NODE_ENV = 'test';
 
   const { default: app } = await import('../server/app.js');
-  const { adapter } = await import('../server/agent.js');
+  const { adapter, getAdapter } = await import('../server/agent.js');
   const { shutdownLiveRuns } = await import('../server/live-runs.js');
 
   const server: Server = createServer(app);
@@ -32,6 +32,7 @@ export async function startTestServer(): Promise<TestServer> {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       shutdownLiveRuns();
       await adapter.stop?.();
+      await getAdapter('openclaw').stop?.();
     },
   };
 }

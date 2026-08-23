@@ -1,89 +1,62 @@
+import { randomUUID } from 'node:crypto';
 import type {
   AgentDefaults,
   AgentModelsResponse,
+  AgentModelOption,
   HermesMessage,
   SessionMetadata,
+  TurnUsage,
 } from '../../shared/types.js';
 import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { OpenClawSocket, type OpenClawEvent } from './openclaw-ws.js';
 
-const execFileAsync = promisify(execFile);
-
-// OpenClaw's gateway serves an OpenResponses-compatible `POST /v1/responses`
-// (must be enabled via `gateway.http.endpoints.responses.enabled` in
-// openclaw.json) plus `GET /v1/models` and `/health`. Session history reads
-// through `GET /sessions/{key}/history`, where the key is
-// `openresponses-user:{user}` — OpenClaw stores each turn we send under the
-// `user` we pass and resolves that partial key to the full session. There is
-// no HTTP route to list sessions or delete a transcript, nor to cancel a turn;
-// `listSessions` therefore shells out to the `openclaw` CLI.
+// The adapter speaks OpenClaw's WebSocket gateway RPC for everything: chat
+// (`chat.send` + the broadcast `chat`/`agent` event streams), session
+// management (`sessions.list/get/patch/delete`), and the model catalog
+// (`models.list`). OpenClaw's HTTP surface is not used — it exposes none of
+// the management API, cannot cancel a turn, and its `/v1/models` lists agent
+// targets rather than LLMs.
 export const DEFAULT_BASE_URL = 'http://localhost:18789';
 
-// OpenClaw keys each gateway session as `openresponses-user:{gateway session id}`.
-// We build that key when reading history and strip it back off when listing.
+// OpenClaw keys each gateway session as `openresponses-user:{gateway session
+// id}` under its default agent (canonically `agent:main:openresponses-user:…`).
+// The WS session RPCs resolve the partial key exactly like the HTTP routes
+// did, so we keep addressing sessions by the short form.
 const SESSION_KEY_PREFIX = 'openresponses-user:';
+
+// Our reasoning efforts map 1:1 onto OpenClaw thinking levels ('none' → 'off');
+// OpenClaw additionally knows max/ultra/adaptive, which we never send.
+const THINKING_MAP: Record<string, string> = {
+  none: 'off',
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+};
 
 function baseUrl(): string {
   return process.env.OPENCLAW_BASE_URL?.trim().replace(/\/$/, '') || DEFAULT_BASE_URL;
 }
 
-function authHeaders(): Record<string, string> {
-  const token = process.env.OPENCLAW_TOKEN?.trim();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-// OpenClaw serves its web UI as a catch-all, so an unknown route (e.g. an older
-// OpenClaw without the /sessions/{key}/history route) answers 200 text/html
-// rather than 404. Treat any non-JSON body as "endpoint absent" so we degrade
-// to empty history instead of choking on `<!doctype …>` in res.json().
-function isJson(res: Response): boolean {
-  return res.headers.get('content-type')?.includes('application/json') ?? false;
-}
-
-async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<{ event: string; data: string }> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  let currentEvent = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() ?? '';
-
-      for (const raw of lines) {
-        const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-        if (line.startsWith('event:')) {
-          currentEvent = line.slice(6).trim();
-        } else if (line.startsWith('data:') && currentEvent) {
-          yield { event: currentEvent, data: line.slice(5).trim() };
-          currentEvent = '';
-        } else if (line === '') {
-          currentEvent = '';
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
+function wsUrl(): string {
+  const url = new URL(baseUrl().replace(/^http/, 'ws'));
+  const loopback = ['localhost', '::1', '[::1]'].includes(url.hostname) || url.hostname.startsWith('127.');
+  if (url.protocol === 'ws:' && !loopback) {
+    // Mirrors OpenClaw's own client policy: the shared token never rides
+    // plaintext off the local machine.
+    throw new Error(`OPENCLAW_BASE_URL must be https:// for remote hosts — refusing to send the OpenClaw token in cleartext to ${url.hostname}`);
   }
+  return url.toString();
 }
 
-interface OpenResponsesEnvelope {
-  response?: {
-    usage?: { input_tokens?: number; output_tokens?: number };
-    error?: { code?: string; message?: string };
-  };
-  delta?: string;
+function sessionKeyFor(sessionId: string): string {
+  return `${SESSION_KEY_PREFIX}${sessionId}`;
 }
 
-// `GET /sessions/{key}/history` message shape. `content` is polymorphic: a bare
-// string, or an array of typed blocks (text / thinking / toolCall). Assistant
-// turns also carry per-turn `usage` and the resolved `model`.
+// Transcript message shape (sessions.get / chat.history). `content` is
+// polymorphic: a bare string, or an array of typed blocks (text / thinking /
+// toolCall). Assistant turns carry per-turn `usage` and the resolved `model`.
 type OpenClawBlock = { type: string; text?: string; thinking?: string };
 interface OpenClawMessage {
   role: 'user' | 'assistant' | 'toolResult' | 'system';
@@ -102,18 +75,52 @@ function blockText(content: string | OpenClawBlock[], kind: 'text' | 'thinking')
     .join('');
 }
 
-// The gateway accepts none..xhigh; OpenClaw only low|medium|high. 'none' is intentionally
-// left unmapped (undefined) so no reasoning param is sent.
-const EFFORT_MAP: Record<string, 'low' | 'medium' | 'high'> = {
-  minimal: 'low',
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'high',
-};
+// `chat` event payloads (state union) and `agent` event payloads, trimmed to
+// the fields we consume.
+interface ChatEventPayload {
+  runId?: string;
+  state?: 'delta' | 'final' | 'aborted' | 'error';
+  deltaText?: string;
+  replace?: boolean;
+  message?: OpenClawMessage;
+  usage?: { input?: number; output?: number };
+  errorMessage?: string;
+  errorKind?: string;
+}
+
+interface AgentEventPayload {
+  runId?: string;
+  stream?: string;
+  data?: { text?: string; delta?: string; name?: string; phase?: string };
+}
+
+interface ModelChoice {
+  id: string;
+  name: string;
+  provider: string;
+  alias?: string;
+  available?: boolean;
+}
+
+function usageFrom(message: OpenClawMessage | undefined, fallback?: { input?: number; output?: number }): TurnUsage | null {
+  const usage = message?.usage ?? fallback;
+  if (!usage) return null;
+  return {
+    input_tokens: usage.input ?? 0,
+    output_tokens: usage.output ?? 0,
+    cost_usd: (usage as OpenClawMessage['usage'])?.cost?.total ?? null,
+  };
+}
+
+// The model catalog values round-trip as `provider/model` (what sessions.patch
+// expects); some catalog ids already carry the provider prefix.
+function modelRef(provider: string, id: string): string {
+  return id.toLowerCase().startsWith(`${provider.toLowerCase()}/`) ? id : `${provider}/${id}`;
+}
 
 export class OpenClawAdapter implements AgentAdapter {
-  private activeRuns = new Map<string, AbortController>();
+  private readonly socket = new OpenClawSocket(wsUrl, () => process.env.OPENCLAW_TOKEN?.trim() || undefined);
+  private readonly activeRuns = new Map<string, string>();
 
   async *chatStream(
     sessionId: string,
@@ -121,137 +128,197 @@ export class OpenClawAdapter implements AgentAdapter {
     options?: AgentRunOptions,
   ): AsyncIterable<StreamEvent> {
     const { settings } = options ?? {};
-    const effort = settings?.reasoningEffort ? EFFORT_MAP[settings.reasoningEffort] : undefined;
+    const sessionKey = sessionKeyFor(sessionId);
+    const runId = randomUUID();
 
-    const controller = new AbortController();
-    this.activeRuns.set(sessionId, controller);
+    // A model pick has no per-turn channel in OpenClaw, so it is applied as
+    // session state — deliberately only when the turn names one, never cleared
+    // here, so a model set through OpenClaw's own surfaces (channels, its UI)
+    // is not clobbered by turns that don't choose.
+    if (settings?.model) {
+      await this.patchSession({ key: sessionKey, model: settings.model });
+    }
 
+    // Reasoning IS per-turn: chat.send's `thinking` overrides the session
+    // level for this run only.
+    const thinking = settings?.reasoningEffort ? THINKING_MAP[settings.reasoningEffort] : undefined;
+
+    // Buffer events from subscription time so nothing lands between the
+    // chat.send ack and the first read.
+    const queue: OpenClawEvent[] = [];
+    let wake: (() => void) | null = null;
+    let dropped: Error | null = null;
+    const unsubscribeEvents = this.socket.onEvent((event) => {
+      if (event.event !== 'chat' && event.event !== 'agent') return;
+      if ((event.payload as ChatEventPayload).runId !== runId) return;
+      queue.push(event);
+      wake?.();
+    });
+    const unsubscribeClose = this.socket.onClose(() => {
+      dropped = new Error('OpenClaw gateway connection dropped mid-turn');
+      (dropped as NodeJS.ErrnoException).code = 'ECONNRESET';
+      wake?.();
+    });
+
+    this.activeRuns.set(sessionId, runId);
     try {
-      // The request schema is strict: unknown fields are rejected, `model` is
-      // required, and `user` is what keys the conversation to a session.
-      const res = await fetch(`${baseUrl()}/v1/responses`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...authHeaders() },
-        signal: controller.signal,
-        body: JSON.stringify({
-          // OpenClaw rejects requests without `model`. When the turn doesn't
-          // set one, bare "openclaw" routes to its default agent; the
-          // session's model stays null gateway-side.
-          model: settings?.model || 'openclaw',
-          input: message,
-          user: sessionId,
-          stream: true,
-          reasoning: effort ? { effort } : undefined,
-        }),
+      const ack = await this.socket.request<{ status?: string }>('chat.send', {
+        sessionKey,
+        message,
+        idempotencyKey: runId,
+        ...(thinking ? { thinking } : {}),
       });
-
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(`OpenClaw POST /v1/responses → ${res.status}: ${body}`);
-      }
-
-      if (!res.body) throw new Error('OpenClaw response has no body');
-
-      for await (const { event, data } of parseSSE(res.body)) {
-        let payload: OpenResponsesEnvelope;
-        try {
-          payload = JSON.parse(data) as OpenResponsesEnvelope;
-        } catch {
-          continue;
-        }
-
-        switch (event) {
-          case 'response.output_text.delta':
-            yield { type: 'text_delta', content: payload.delta ?? '' };
-            break;
-          case 'response.completed': {
-            const usage = payload.response?.usage;
-            yield {
-              type: 'done',
-              sessionId,
-              usage: usage
-                ? {
-                    input_tokens: usage.input_tokens ?? 0,
-                    output_tokens: usage.output_tokens ?? 0,
-                    cost_usd: null,
-                  }
-                : null,
-              interrupted: false,
-            };
-            break;
-          }
-          case 'response.failed': {
-            const err = payload.response?.error;
-            yield {
-              type: 'error',
-              error: err?.message ?? 'OpenClaw error',
-              code: err?.code,
-            };
-            break;
-          }
-        }
-      }
-    } catch (error) {
-      // OpenClaw has no cancel API; an interrupt aborts our stream and the
-      // turn ends as cancelled. OpenClaw may keep working server-side.
-      if (controller.signal.aborted) {
+      // OpenClaw can ack ok WITHOUT starting a run — its plain-text stop
+      // commands ("stop", "exit", …) and restart/admission races — and then
+      // no event ever carries this runId. Anything but a fresh start is
+      // terminal here, or the stream would wait forever and wedge the
+      // session behind session_busy.
+      if (ack.status !== 'started') {
         yield { type: 'done', sessionId, usage: null, interrupted: true };
         return;
       }
-      throw error;
+
+      // Text and thinking arrive both as increments and as cumulative
+      // refreshes (`replace` deltas / cumulative agent text); emitted-length
+      // counters keep the output append-only either way.
+      let sentText = 0;
+      let sentThinking = 0;
+
+      while (true) {
+        if (queue.length === 0) {
+          if (dropped) throw dropped;
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            if (dropped) resolve();
+          });
+          wake = null;
+          continue;
+        }
+        const { event, payload } = queue.shift()!;
+
+        if (event === 'agent') {
+          const agent = payload as AgentEventPayload;
+          if (agent.stream === 'thinking') {
+            const cumulative = agent.data?.text;
+            let delta = agent.data?.delta ?? '';
+            if (!delta && typeof cumulative === 'string' && cumulative.length > sentThinking) {
+              delta = cumulative.slice(sentThinking);
+            }
+            if (delta) {
+              sentThinking += delta.length;
+              yield { type: 'thinking_delta', content: delta };
+            }
+          } else if (agent.stream === 'tool' && agent.data?.name) {
+            const phase = agent.data.phase;
+            if (phase === 'start' || phase === 'result') {
+              yield {
+                type: 'tool_progress',
+                tool: agent.data.name,
+                status: phase === 'start' ? 'running' : 'completed',
+              };
+            }
+          }
+          continue;
+        }
+
+        const chat = payload as ChatEventPayload;
+        switch (chat.state) {
+          case 'delta': {
+            if (chat.replace) {
+              const full = blockText(chat.message?.content ?? chat.deltaText ?? '', 'text');
+              if (full.length > sentText) {
+                yield { type: 'text_delta', content: full.slice(sentText) };
+                sentText = full.length;
+              }
+            } else if (chat.deltaText) {
+              sentText += chat.deltaText.length;
+              yield { type: 'text_delta', content: chat.deltaText };
+            }
+            break;
+          }
+          case 'final': {
+            const full = chat.message ? blockText(chat.message.content, 'text') : '';
+            if (full.length > sentText) {
+              yield { type: 'text_delta', content: full.slice(sentText) };
+            }
+            // The live final event usually omits usage; the transcript's last
+            // assistant message carries the authoritative numbers.
+            let usage = usageFrom(chat.message, chat.usage);
+            if (!usage) usage = await this.lastAssistantUsage(sessionId);
+            yield { type: 'done', sessionId, usage, interrupted: false };
+            return;
+          }
+          case 'aborted':
+            yield { type: 'done', sessionId, usage: usageFrom(chat.message, chat.usage), interrupted: true };
+            return;
+          case 'error':
+            yield {
+              type: 'error',
+              error: chat.errorMessage ?? 'OpenClaw error',
+              code: chat.errorKind,
+            };
+            return;
+        }
+      }
     } finally {
+      unsubscribeEvents();
+      unsubscribeClose();
       this.activeRuns.delete(sessionId);
     }
   }
 
   async interruptChat(sessionId: string): Promise<boolean> {
-    const controller = this.activeRuns.get(sessionId);
-    if (!controller) return false;
-    controller.abort();
-    return true;
+    const runId = this.activeRuns.get(sessionId);
+    if (!runId) return false;
+    // The run then terminates through its own `state:'aborted'` chat event,
+    // which ends the stream above.
+    const result = await this.socket.request<{ aborted?: boolean }>('chat.abort', {
+      sessionKey: sessionKeyFor(sessionId),
+      runId,
+    });
+    return result.aborted === true;
   }
 
   async healthCheck(): Promise<boolean> {
     try {
-      const res = await fetch(`${baseUrl()}/health`);
-      return res.ok;
+      await this.socket.ensureConnected();
+      return true;
     } catch {
       return false;
     }
   }
 
-  // Raw transcript for a session, read through OpenClaw's history endpoint. The
-  // `user` we send on each turn keys the session as `openresponses-user:{user}`,
-  // which OpenClaw resolves from this partial key.
-  private async fetchHistory(sessionId: string): Promise<OpenClawMessage[]> {
-    const key = `${SESSION_KEY_PREFIX}${sessionId}`;
-    const res = await fetch(
-      `${baseUrl()}/sessions/${encodeURIComponent(key)}/history?limit=500`,
-      { headers: authHeaders() },
-    );
-    if (res.status === 404 || !isJson(res)) return []; // unknown session / no history API
-    if (!res.ok) throw new Error(`OpenClaw GET /sessions/{key}/history → ${res.status}`);
-    const { messages } = await res.json() as { messages?: OpenClawMessage[] };
-    return messages ?? [];
-  }
-
   async listSessions(): Promise<Record<string, unknown>[]> {
-    // OpenClaw's session list (`sessions.list`) is a gateway RPC, never exposed on
-    // the HTTP surface (only `/sessions/{key}/history` is). The supported machine
-    // path is the `openclaw` CLI, which reads the on-disk session store directly.
-    // We keep the sessions the gateway created — keyed `openresponses-user:{user}`
-    // under the default agent — and surface that `{user}` as `id`, so each entry
-    // round-trips to `GET /v1/sessions/:id` (which reads `openresponses-user:{id}`).
-    const { stdout } = await execFileAsync(
-      'openclaw',
-      ['sessions', 'list', '--json', '--limit', 'all'],
-      { maxBuffer: 16 * 1024 * 1024 },
-    );
-    const { sessions } = JSON.parse(stdout) as { sessions?: Record<string, unknown>[] };
-    return (sessions ?? [])
+    const result = await this.socket.request<{ sessions?: Record<string, unknown>[] }>('sessions.list', {
+      limit: 1000,
+    });
+    // Keep the sessions this gateway created and surface the `{user}` part as
+    // `id`, so each entry round-trips to `GET /v1/sessions/:id`.
+    return (result.sessions ?? [])
       .filter((s): s is Record<string, unknown> & { key: string } =>
         typeof s.key === 'string' && s.key.includes(SESSION_KEY_PREFIX))
       .map((s) => ({ ...s, id: s.key.slice(s.key.indexOf(SESSION_KEY_PREFIX) + SESSION_KEY_PREFIX.length) }));
+  }
+
+  private async lastAssistantUsage(sessionId: string): Promise<TurnUsage | null> {
+    try {
+      const result = await this.socket.request<{ messages?: OpenClawMessage[] }>('sessions.get', {
+        key: sessionKeyFor(sessionId),
+        limit: 10,
+      });
+      const last = [...(result.messages ?? [])].reverse().find((m) => m.role === 'assistant' && m.usage);
+      return last ? usageFrom(last) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async fetchHistory(sessionId: string): Promise<OpenClawMessage[]> {
+    const result = await this.socket.request<{ messages?: OpenClawMessage[] }>('sessions.get', {
+      key: sessionKeyFor(sessionId),
+      limit: 500,
+    });
+    return result.messages ?? [];
   }
 
   async getMessages(sessionId: string): Promise<HermesMessage[]> {
@@ -273,8 +340,7 @@ export class OpenClawAdapter implements AgentAdapter {
   async getSessionMetadata(sessionId: string): Promise<SessionMetadata | null> {
     const messages = await this.fetchHistory(sessionId);
     if (messages.length === 0) return null;
-    // OpenClaw has no HTTP session-meta route; aggregate the per-turn usage that
-    // rides on assistant messages instead.
+    // Aggregate the per-turn usage that rides on assistant messages.
     const meta: SessionMetadata = {
       id: sessionId,
       input_tokens: 0,
@@ -298,34 +364,71 @@ export class OpenClawAdapter implements AgentAdapter {
     return meta;
   }
 
-  async deleteSession(): Promise<boolean> {
-    // OpenClaw 2026.6.5 exposes no HTTP route to delete a stored transcript
-    // (only `/sessions/{key}/kill`, which aborts an active run). The gateway
-    // keeps no records of its own, so a delete is a no-op here.
-    return false;
+  async deleteSession(sessionId: string): Promise<boolean> {
+    // Removes the session entry and archives its transcript off the active
+    // path. An unknown key reports deleted:false rather than an error.
+    const result = await this.socket.request<{ deleted?: boolean }>('sessions.delete', {
+      key: sessionKeyFor(sessionId),
+      deleteTranscript: true,
+    });
+    return result.deleted === true;
+  }
+
+  async renameSession(sessionId: string, title: string): Promise<boolean> {
+    try {
+      await this.patchSession({ key: sessionKeyFor(sessionId), label: title });
+    } catch (error) {
+      // OpenClaw session labels are unique; surface a clash as the documented
+      // 409, matching the Hermes title semantics.
+      if (error instanceof Error && error.message.includes('label already in use')) {
+        (error as NodeJS.ErrnoException).code = 'title_conflict';
+      }
+      throw error;
+    }
+    return true;
+  }
+
+  // sessions.patch compare-and-sets against the session entry, and a patch
+  // landing right after a turn can lose to the run's own bookkeeping write.
+  // OpenClaw's conflict error literally instructs "Retry." — one retry is the
+  // protocol, not defensiveness.
+  private async patchSession(params: Record<string, unknown>): Promise<void> {
+    try {
+      await this.socket.request('sessions.patch', params);
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('changed before')) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await this.socket.request('sessions.patch', params);
+    }
   }
 
   async getModels(): Promise<AgentModelsResponse> {
-    const res = await fetch(`${baseUrl()}/v1/models`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(`OpenClaw GET /v1/models → ${res.status}`);
-    const data = await res.json() as { data: { id: string }[] };
+    const result = await this.socket.request<{ models?: ModelChoice[] }>('models.list', { view: 'configured' });
+    const byProvider = new Map<string, AgentModelOption[]>();
+    for (const model of result.models ?? []) {
+      if (model.available === false) continue;
+      const options = byProvider.get(model.provider) ?? [];
+      options.push({
+        id: modelRef(model.provider, model.id),
+        label: model.alias ?? model.name,
+        source: 'catalog',
+        provider: model.provider,
+        isCurrentDefault: false,
+      });
+      byProvider.set(model.provider, options);
+    }
     return {
       defaultModel: null,
       activeProvider: 'openclaw',
-      groups: [{
-        provider: 'openclaw',
-        models: data.data.map((m) => ({
-          id: m.id,
-          label: m.id,
-          source: 'catalog',
-          provider: 'openclaw',
-          isCurrentDefault: false,
-        })),
-      }],
+      groups: [...byProvider.entries()].map(([provider, models]) => ({ provider, models })),
     };
   }
 
   async getDefaults(): Promise<AgentDefaults> {
     return { provider: null, model: null, baseUrl: null, apiMode: null, reasoningEffort: null, showReasoning: false };
+  }
+
+  async stop(): Promise<void> {
+    this.socket.close();
   }
 }

@@ -8,7 +8,7 @@ export const sessionsRouter = Router();
 
 // GET /v1/sessions?agent= — list a harness's sessions straight from its own
 // store, native fields untouched. The harness owns the transcript and the index;
-// the gateway keeps none. Harnesses without a list API (OpenClaw) return [].
+// the gateway keeps none. Harnesses without a list API return [].
 sessionsRouter.get('/', async (req, res, next) => {
   let agent: AgentType | undefined;
   try {
@@ -62,7 +62,7 @@ sessionsRouter.delete('/:id', async (req, res, next) => {
 
 // PATCH /v1/sessions/:id?agent= — rename a session by writing its title into the
 // harness's own store (no gateway DB). Only harnesses that natively store an
-// editable title implement it; the rest (OpenClaw) answer 405.
+// editable title implement it; the rest answer 405.
 sessionsRouter.patch('/:id', async (req, res, next) => {
   let agent: AgentType | undefined;
   try {
