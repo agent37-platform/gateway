@@ -11,6 +11,7 @@
 import type {
   AgentType,
   ApiError,
+  ContextUsage,
   ResponseObject,
   ResponseStatus,
   TurnUsage,
@@ -68,6 +69,7 @@ export function insertResponse(input: {
     provider: input.provider ?? null,
     output_text: '',
     usage: null,
+    context: null,
     error: null,
     metadata: input.metadata ?? null,
     created: Date.now(),
@@ -84,6 +86,7 @@ export function finalizeResponse(
     status: ResponseStatus;
     output_text: string;
     usage: TurnUsage | null;
+    context: ContextUsage | null;
     error: ApiError | null;
     model: string | null;
     provider: string | null;
@@ -94,6 +97,7 @@ export function finalizeResponse(
   response.status = fields.status;
   response.output_text = fields.output_text;
   response.usage = fields.usage;
+  response.context = fields.context;
   response.error = fields.error;
   response.model = fields.model;
   response.provider = fields.provider;

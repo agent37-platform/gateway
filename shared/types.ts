@@ -63,6 +63,13 @@ export interface TurnUsage {
   cost_usd?: number | null;
 }
 
+/** The session's live context window: the tokens occupying the model's window
+ *  as of the latest turn, against the window's size. */
+export interface ContextUsage {
+  used_tokens: number;
+  window_tokens: number;
+}
+
 // ---------------------------------------------------------------------------
 // Public API: responses
 // ---------------------------------------------------------------------------
@@ -80,6 +87,8 @@ export interface ResponseObject {
   provider: string | null;
   output_text: string;
   usage: TurnUsage | null;
+  /** Null when the harness didn't report a context measurement for the turn. */
+  context: ContextUsage | null;
   error: ApiError | null;
   metadata: Record<string, unknown> | null;
   created: number;
@@ -156,7 +165,7 @@ export type ResponseStreamEvent =
   | { event: 'response.tool_call.started'; data: { tool: string; label?: string } }
   | { event: 'response.tool_call.completed'; data: { tool: string; duration_ms?: number } }
   | { event: 'response.tool_call.failed'; data: { tool: string; error?: string } }
-  | { event: 'response.completed'; data: { output_text: string; usage: TurnUsage | null } }
+  | { event: 'response.completed'; data: { output_text: string; usage: TurnUsage | null; context: ContextUsage | null } }
   | { event: 'response.failed'; data: { error: ApiError } };
 
 export type ResponseStreamEventName = ResponseStreamEvent['event'];
@@ -170,11 +179,6 @@ export interface AgentRunSettings {
   model?: string | null;
   provider?: string | null;
   reasoningEffort?: ReasoningEffort | null;
-}
-
-export interface ContextUsage {
-  used_tokens: number;
-  window_tokens: number;
 }
 
 /** A raw message row projected by the worker's `session.messages.get`. */

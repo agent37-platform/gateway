@@ -3,6 +3,7 @@ import type { AgentType, SessionMessage } from '../../shared/types.js';
 import { getAdapter, agentFromQuery } from '../agent.js';
 import { gatewayErrorFromWorker, renameUnsupported, validationError } from '../errors.js';
 import { activeResponseForSession } from '../live-runs.js';
+import { forgetSessionContext, sessionContextFor } from '../responses.js';
 
 export const sessionsRouter = Router();
 
@@ -26,6 +27,8 @@ sessionsRouter.get('/', async (req, res, next) => {
 // harness. An unknown id projects to empty history rather than 404 — the harness
 // owns existence. `active_response_id` names the in_progress response on the
 // session (null when idle); follow it via GET /v1/responses/{id}/stream.
+// `context` is the session's last reported context window (null until a turn
+// reports one within this process's lifetime).
 sessionsRouter.get('/:id', async (req, res, next) => {
   let agent: AgentType | undefined;
   try {
@@ -44,6 +47,7 @@ sessionsRouter.get('/:id', async (req, res, next) => {
       agent,
       active_response_id: activeResponseForSession(req.params.id) ?? null,
       history,
+      context: sessionContextFor(req.params.id),
     });
   } catch (error) {
     next(gatewayErrorFromWorker(error, 'Session history unavailable', agent));
@@ -56,6 +60,7 @@ sessionsRouter.delete('/:id', async (req, res, next) => {
   try {
     agent = agentFromQuery(req.query.agent);
     const deleted = await getAdapter(agent).deleteSession(req.params.id);
+    forgetSessionContext(req.params.id);
     res.json({ id: req.params.id, deleted });
   } catch (error) {
     next(gatewayErrorFromWorker(error, 'Could not delete session', agent));

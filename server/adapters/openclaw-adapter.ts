@@ -8,7 +8,7 @@ import type {
   SessionSummary,
   TurnUsage,
 } from '../../shared/types.js';
-import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
+import type { AgentAdapter, AgentRunOptions, ContextUsage, StreamEvent } from './types.js';
 import { epochMillis } from './types.js';
 import { OpenClawSocket, type OpenClawEvent } from './openclaw-ws.js';
 
@@ -25,6 +25,9 @@ export const DEFAULT_BASE_URL = 'http://localhost:18789';
 // The WS session RPCs resolve the partial key exactly like the HTTP routes
 // did, so we keep addressing sessions by the short form.
 const SESSION_KEY_PREFIX = 'openresponses-user:';
+
+// How long one models.list result serves context-window lookups.
+const MODEL_CATALOG_TTL_MS = 60_000;
 
 // Our reasoning efforts map 1:1 onto OpenClaw thinking levels ('none' → 'off');
 // OpenClaw additionally knows max/ultra/adaptive, which we never send.
@@ -65,7 +68,7 @@ interface OpenClawMessage {
   content: string | OpenClawBlock[];
   timestamp: number;
   model?: string;
-  usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: { total?: number } };
+  usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number; cost?: { total?: number } };
 }
 
 // Flatten block content (or a bare string) to plain text of one kind.
@@ -102,6 +105,7 @@ interface ModelChoice {
   provider: string;
   alias?: string;
   available?: boolean;
+  contextWindow?: number;
 }
 
 function usageFrom(message: OpenClawMessage | undefined, fallback?: { input?: number; output?: number }): TurnUsage | null {
@@ -120,9 +124,17 @@ function modelRef(provider: string, id: string): string {
   return id.toLowerCase().startsWith(`${provider.toLowerCase()}/`) ? id : `${provider}/${id}`;
 }
 
+// Transcript `model` values and catalog ids disagree on the provider prefix;
+// compare on the bare model id.
+function bareModelId(ref: string): string {
+  const slash = ref.indexOf('/');
+  return (slash >= 0 ? ref.slice(slash + 1) : ref).toLowerCase();
+}
+
 export class OpenClawAdapter implements AgentAdapter {
   private readonly socket = new OpenClawSocket(wsUrl, () => process.env.OPENCLAW_TOKEN?.trim() || undefined);
   private readonly activeRuns = new Map<string, string>();
+  private modelCatalog: { at: number; models: ModelChoice[] } | null = null;
 
   async *chatStream(
     sessionId: string,
@@ -245,9 +257,10 @@ export class OpenClawAdapter implements AgentAdapter {
             }
             // The live final event usually omits usage; the transcript's last
             // assistant message carries the authoritative numbers.
-            let usage = usageFrom(chat.message, chat.usage);
-            if (!usage) usage = await this.lastAssistantUsage(sessionId);
-            yield { type: 'done', sessionId, usage, interrupted: false };
+            let message = chat.message;
+            if (!message?.usage) message = (await this.lastAssistantMessage(sessionId)) ?? message;
+            const usage = usageFrom(message, chat.usage);
+            yield { type: 'done', sessionId, usage, context: await this.contextUsage(message), interrupted: false };
             return;
           }
           case 'aborted':
@@ -310,17 +323,52 @@ export class OpenClawAdapter implements AgentAdapter {
       }));
   }
 
-  private async lastAssistantUsage(sessionId: string): Promise<TurnUsage | null> {
+  private async lastAssistantMessage(sessionId: string): Promise<OpenClawMessage | null> {
     try {
       const result = await this.socket.request<{ messages?: OpenClawMessage[] }>('sessions.get', {
         key: sessionKeyFor(sessionId),
         limit: 10,
       });
-      const last = [...(result.messages ?? [])].reverse().find((m) => m.role === 'assistant' && m.usage);
-      return last ? usageFrom(last) : null;
+      return [...(result.messages ?? [])].reverse().find((m) => m.role === 'assistant' && m.usage) ?? null;
     } catch {
       return null;
     }
+  }
+
+  // OpenClaw reports no context measurement on the wire, so derive it: the
+  // assistant message's usage totals are the tokens occupying the window after
+  // the turn, and the model's catalog entry carries the window size.
+  private async contextUsage(message: OpenClawMessage | undefined): Promise<ContextUsage | null> {
+    const usage = message?.usage;
+    const model = message?.model;
+    if (!usage || !model) return null;
+    const used =
+      usage.totalTokens ?? (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+    if (used <= 0) return null;
+    try {
+      const entry = (await this.cachedModels()).find(
+        (m) => m.available !== false && bareModelId(m.id) === bareModelId(model),
+      );
+      return entry?.contextWindow && entry.contextWindow > 0
+        ? { used_tokens: used, window_tokens: entry.contextWindow }
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async cachedModels(): Promise<ModelChoice[]> {
+    if (this.modelCatalog && Date.now() - this.modelCatalog.at < MODEL_CATALOG_TTL_MS) {
+      return this.modelCatalog.models;
+    }
+    return await this.fetchModels();
+  }
+
+  private async fetchModels(): Promise<ModelChoice[]> {
+    const result = await this.socket.request<{ models?: ModelChoice[] }>('models.list', { view: 'configured' });
+    const models = result.models ?? [];
+    if (models.length > 0) this.modelCatalog = { at: Date.now(), models };
+    return models;
   }
 
   private async fetchHistory(sessionId: string): Promise<OpenClawMessage[]> {
@@ -413,9 +461,9 @@ export class OpenClawAdapter implements AgentAdapter {
   }
 
   async getModels(): Promise<AgentModelsResponse> {
-    const result = await this.socket.request<{ models?: ModelChoice[] }>('models.list', { view: 'configured' });
+    const models = await this.fetchModels();
     const byProvider = new Map<string, AgentModelOption[]>();
-    for (const model of result.models ?? []) {
+    for (const model of models) {
       if (model.available === false) continue;
       const options = byProvider.get(model.provider) ?? [];
       options.push({

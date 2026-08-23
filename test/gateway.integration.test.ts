@@ -38,6 +38,7 @@ interface ResponseBody {
   model: string | null;
   output_text: string;
   usage: unknown;
+  context: { used_tokens: number; window_tokens: number } | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -105,6 +106,11 @@ test('responses and sessions work end-to-end through the local LLM', async () =>
   assertCompleted(created);
   assert.equal(created.metadata?.marker, marker);
 
+  // Hermes measures its context window every turn; the response reports it.
+  assert.ok(created.context);
+  assert.ok(created.context.used_tokens > 0);
+  assert.ok(created.context.window_tokens >= created.context.used_tokens);
+
   // GET /v1/sessions lists from the harness, projected into the shared
   // SessionSummary row shape; the chosen agent is echoed at the top level.
   // `?agent=` selects the harness (default hermes); an unknown agent is a 400.
@@ -132,9 +138,11 @@ test('responses and sessions work end-to-end through the local LLM', async () =>
     id: string;
     active_response_id: string | null;
     history: Array<{ role: string; content: string }>;
+    context: { used_tokens: number; window_tokens: number } | null;
   }>(await fetch(`${base}/v1/sessions/${created.session_id}`));
   assert.equal(session.id, created.session_id);
   assert.equal(session.active_response_id, null); // idle session
+  assert.ok(session.context && session.context.used_tokens > 0); // last turn's context rides on the session
   assert.ok(session.history.some((message) => message.role === 'user' && message.content.includes(marker)));
   assert.ok(session.history.some((message) => message.role === 'assistant' && message.content.trim()));
 
@@ -199,6 +207,7 @@ test('streaming responses can be replayed', async () => {
   assert.equal(events[0]?.event, 'response.created');
   assert.equal(events.at(-1)?.event, 'response.completed');
   assert.ok(events.some((event) => event.event === 'response.output_text.delta'));
+  assert.ok(events.at(-1)?.data.context); // context rides the completed event
 
   const responseId = events[0].data.id as string;
 

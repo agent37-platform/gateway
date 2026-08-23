@@ -10,6 +10,7 @@ import type { AgentRunSettings, StreamEvent } from './adapters/types.js';
 import type {
   AgentType,
   ApiError,
+  ContextUsage,
   ReasoningEffort,
   ResponseObject,
   ResponseStatus,
@@ -113,6 +114,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
 
   let outputText = '';
   let usage: TurnUsage | null = null;
+  let context: ContextUsage | null = null;
   let apiError: ApiError | null = null;
   let status: ResponseStatus = 'completed';
   let sawTerminal = false;
@@ -140,6 +142,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
           sawTerminal = true;
           if (status !== 'failed') {
             usage = event.usage ?? null;
+            context = event.context ?? null;
             status = event.interrupted ? 'cancelled' : 'completed';
           }
           break;
@@ -163,13 +166,14 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
   if (status === 'failed' && apiError) {
     emit(responseId, { event: 'response.failed', data: { error: apiError } });
   } else {
-    emit(responseId, { event: 'response.completed', data: { output_text: outputText, usage } });
+    emit(responseId, { event: 'response.completed', data: { output_text: outputText, usage, context } });
   }
 
   // Record the terminal state, then release the session lock and end live
   // subscribers. The response store is an in-memory map, so neither call throws.
-  finalizeResponse(responseId, { status, output_text: outputText, usage, error: apiError, model, provider });
+  finalizeResponse(responseId, { status, output_text: outputText, usage, context, error: apiError, model, provider });
   markFinished(responseId, status);
+  if (context) rememberSessionContext(sessionId, context);
 
   return (
     getResponse(responseId) ?? {
@@ -181,6 +185,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
       provider,
       output_text: outputText,
       usage,
+      context,
       error: apiError,
       metadata: null,
       created: Date.now(),
@@ -215,8 +220,33 @@ export function synthesizeStreamEvents(response: ResponseObject): ResponseStream
   } else {
     events.push({
       event: 'response.completed',
-      data: { output_text: response.output_text, usage: response.usage },
+      data: { output_text: response.output_text, usage: response.usage, context: response.context },
     });
   }
   return events;
+}
+
+// ---------------------------------------------------------------------------
+// Last reported context per session, for `GET /v1/sessions/{id}`. In-memory
+// like the response store: after a restart it is null until the next turn.
+// ---------------------------------------------------------------------------
+
+const MAX_SESSION_CONTEXTS = 1000;
+const sessionContexts = new Map<string, ContextUsage>();
+
+function rememberSessionContext(sessionId: string, context: ContextUsage): void {
+  sessionContexts.delete(sessionId);
+  if (sessionContexts.size >= MAX_SESSION_CONTEXTS) {
+    const oldest = sessionContexts.keys().next().value;
+    if (oldest !== undefined) sessionContexts.delete(oldest);
+  }
+  sessionContexts.set(sessionId, context);
+}
+
+export function sessionContextFor(sessionId: string): ContextUsage | null {
+  return sessionContexts.get(sessionId) ?? null;
+}
+
+export function forgetSessionContext(sessionId: string): void {
+  sessionContexts.delete(sessionId);
 }

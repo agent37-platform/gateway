@@ -155,6 +155,7 @@ Non-streaming returns the finished response object:
   "provider": null,
   "output_text": "…",
   "usage": { "input_tokens": 1840, "output_tokens": 920, "cost_usd": 0.0137 },
+  "context": { "used_tokens": 22600, "window_tokens": 256000 }, // tokens occupying the model's context window; null when the harness can't measure it
   "error": null,
   "metadata": null,
   "created": 1748400000000
@@ -171,7 +172,7 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 | `response.tool_call.started` | `{ tool, label }` |
 | `response.tool_call.completed` | `{ tool, duration_ms }` |
 | `response.tool_call.failed` | `{ tool, error }` |
-| `response.completed` | `{ output_text, usage }` |
+| `response.completed` | `{ output_text, usage, context }` |
 | `response.failed` | `{ error: { code, message } }` |
 
 ### Follow up on a response
@@ -189,7 +190,7 @@ running response as `active_response_id`.
 | Action | Endpoint |
 | --- | --- |
 | List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
-| Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history }` (`?agent=` to pick the harness) |
+| Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history, context }` (`?agent=` to pick the harness; `context` is the session's last reported context window, null until a turn reports one) |
 | Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label). A harness without an editable title answers `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |
 
