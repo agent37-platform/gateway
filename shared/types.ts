@@ -89,9 +89,19 @@ export interface ResponseObject {
 // Public API: sessions
 // ---------------------------------------------------------------------------
 
-// Listing a harness's sessions (`GET /v1/sessions?agent=`) passes the backend's
-// own session objects through untouched, so there is no gateway-owned session
-// type — each harness (Hermes SessionDB, ...) defines its own fields.
+/** One row of the session list (`GET /v1/sessions?agent=`). Every harness
+ *  projects its native store into this one shape (Hermes rows already use these
+ *  names; OpenClaw's `label`/`updatedAt` become `title`/`last_active`), so
+ *  clients never branch on the harness. Fields a harness doesn't track are null. */
+export interface SessionSummary {
+  id: string;
+  /** The harness's own editable title — what PATCH rename writes. */
+  title: string | null;
+  /** Last activity, epoch milliseconds. */
+  last_active: number | null;
+  message_count: number | null;
+  preview: string | null;
+}
 
 /** A message in a session's history, projected from the session's harness backend (Hermes SessionDB, OpenClaw history, ...). */
 export interface SessionMessage {

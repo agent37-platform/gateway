@@ -105,14 +105,16 @@ test('responses and sessions work end-to-end through the local LLM', async () =>
   assertCompleted(created);
   assert.equal(created.metadata?.marker, marker);
 
-  // GET /v1/sessions lists straight from the harness, native fields untouched;
-  // the chosen agent is echoed at the top level. `?agent=` selects the harness
-  // (default hermes); an unknown agent is a 400.
-  const sessions = await jsonOk<{ agent: string; data: Array<{ id: string }> }>(
+  // GET /v1/sessions lists from the harness, projected into the shared
+  // SessionSummary row shape; the chosen agent is echoed at the top level.
+  // `?agent=` selects the harness (default hermes); an unknown agent is a 400.
+  const sessions = await jsonOk<{ agent: string; data: Array<{ id: string; title: string | null; last_active: number | null }> }>(
     await fetch(`${base}/v1/sessions`),
   );
   assert.equal(sessions.agent, 'hermes');
-  assert.ok(sessions.data.some((session) => session.id === created.session_id));
+  const listedRow = sessions.data.find((session) => session.id === created.session_id);
+  assert.ok(listedRow);
+  assert.equal(typeof listedRow.last_active, 'number');
 
   const hermesSessions = await jsonOk<{ agent: string; data: Array<{ id: string }> }>(
     await fetch(`${base}/v1/sessions?agent=hermes`),
@@ -147,8 +149,7 @@ test('responses and sessions work end-to-end through the local LLM', async () =>
   assert.equal(continued.session_id, created.session_id);
 
   // Rename writes the title straight into Hermes' SessionDB; it round-trips
-  // through the native `title` field the session list passes through — no
-  // gateway-side store involved.
+  // through the session list's `title` — no gateway-side store involved.
   const renameTitle = `renamed-${marker}`;
   const renamed = await jsonOk<{ id: string; agent: string; renamed: boolean }>(
     await fetch(`${base}/v1/sessions/${created.session_id}`, {
@@ -370,10 +371,10 @@ test('openclaw responses complete, stream, and stay on one session', { skip: ope
     }),
   );
   assert.equal(rename.renamed, true);
-  const renamedList = await jsonOk<{ data: Array<{ id: string; label?: string }> }>(
+  const renamedList = await jsonOk<{ data: Array<{ id: string; title: string | null }> }>(
     await fetch(`${base}/v1/sessions?agent=openclaw`),
   );
-  assert.equal(renamedList.data.find((s) => s.id === created.session_id)?.label, title);
+  assert.equal(renamedList.data.find((s) => s.id === created.session_id)?.title, title);
 
   // The model catalog lists OpenClaw's real LLM choices, not agent targets.
   const models = await jsonOk<{ data: Array<{ id: string; owned_by: string }> }>(

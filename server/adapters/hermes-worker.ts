@@ -11,8 +11,10 @@ import type {
   GoalStateSnapshot,
   HermesMessage,
   SessionMetadata,
+  SessionSummary,
 } from '../../shared/types.js';
 import type { AgentAdapter, AgentRunOptions, GoalCapableAdapter, StreamEvent } from './types.js';
+import { epochMillis } from './types.js';
 import type { WorkerEvent, WorkerRequest, WorkerResult, WorkerErrorPayload } from './worker-protocol.js';
 import { expandHomePrefix, resolveHermesHome, resolveWorkspaceDir } from '../paths.js';
 
@@ -489,11 +491,22 @@ export class HermesWorkerAdapter implements AgentAdapter, GoalCapableAdapter {
     }
   }
 
-  async listSessions(): Promise<Record<string, unknown>[]> {
+  async listSessions(): Promise<SessionSummary[]> {
     const result = await this.client.request<{ sessions: Record<string, unknown>[] }>({
       type: 'sessions.list',
     });
-    return result.sessions;
+    // Hermes' native rows already use the contract's names; project them so
+    // only the shared shape (and no SessionDB extras) leaves the gateway.
+    return result.sessions.flatMap((row) => {
+      if (typeof row.id !== 'string' || !row.id) return [];
+      return [{
+        id: row.id,
+        title: typeof row.title === 'string' && row.title.trim() ? row.title : null,
+        last_active: epochMillis(row.last_active),
+        message_count: typeof row.message_count === 'number' ? row.message_count : null,
+        preview: typeof row.preview === 'string' && row.preview.trim() ? row.preview : null,
+      }];
+    });
   }
 
   async getMessages(sessionId: string): Promise<HermesMessage[]> {
