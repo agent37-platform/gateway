@@ -197,9 +197,17 @@ def _error_payload(exc: BaseException) -> dict[str, str]:
     elif "unauthorized" in lower or "authentication" in lower or "401" in lower or "api key" in lower:
         code = "auth_error"
         hint = "Run hermes model or update ~/.hermes/config.yaml credentials."
-    elif "instance_budget_exhausted" in lower or "budget exhausted" in lower or "insufficient_balance" in lower:
+    elif (
+        "instance_budget_exhausted" in lower
+        or "budget exhausted" in lower
+        or "insufficient_balance" in lower
+        or "balance exhausted" in lower
+    ):
         # Checked before "rate limit": a budget refusal often reaches us as
         # "Rate limited after N retries — HTTP 402: Instance budget exhausted…".
+        # Hermes summarizes a 402 body to its `message` only (the `type` is
+        # dropped), so the wallet refusal arrives as "HTTP 402: Workspace
+        # balance exhausted. Top up the workspace wallet to continue."
         code = "quota_exhausted"
         hint = "Raise the instance budget or top up the workspace balance."
     elif "rate limit" in lower or "429" in lower:
