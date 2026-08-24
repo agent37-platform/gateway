@@ -1,5 +1,6 @@
 import { HermesWorkerAdapter } from './adapters/hermes-worker.js';
 import { OpenClawAdapter } from './adapters/openclaw-adapter.js';
+import { ClaudeCodeAdapter } from './adapters/claude-code-adapter.js';
 import type { AgentAdapter } from './adapters/types.js';
 import { resolveConfiguredDefaultAgent, SUPPORTED_AGENTS, type AgentType } from '../shared/types.js';
 import { optionalEnum, queryParam } from './errors.js';
@@ -12,6 +13,7 @@ export interface GatewayAdapter extends AgentAdapter {
 const registry: Record<AgentType, GatewayAdapter> = {
   hermes: new HermesWorkerAdapter(),
   openclaw: new OpenClawAdapter(),
+  'claude-code': new ClaudeCodeAdapter(),
 };
 
 export function getAdapter(agent: AgentType): GatewayAdapter {

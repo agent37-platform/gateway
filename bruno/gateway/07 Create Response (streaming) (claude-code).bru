@@ -1,0 +1,44 @@
+meta {
+  name: 07 Create Response (streaming) (claude-code)
+  type: http
+  seq: 20
+}
+
+post {
+  url: {{baseUrl}}/v1/responses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": "Count from 1 to 5, one number per line.",
+    "agent": "claude-code",
+    "reasoning_effort": "low",
+    "stream": true
+  }
+}
+
+docs {
+  Streaming is agent-agnostic: pass `"agent": "claude-code"` alongside
+  `"stream": true` and the gateway streams the Claude Code turn back as
+  Server-Sent Events, exactly like the Hermes streaming request above:
+    response.created -> response.reasoning.delta / response.output_text.delta /
+    response.tool_call.* -> response.completed (or response.failed)
+
+  The Claude Code adapter reads the Claude Agent SDK's own partial-message
+  stream and re-emits it as gateway SSE, so there's no extra setup beyond a
+  Claude Code install that's logged in on this machine:
+    claude auth login   (or ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN in the
+    gateway's environment)
+
+  Bruno shows the assembled event stream in the Response pane. For raw frames:
+
+    curl -N localhost:3737/v1/responses \
+      -H 'content-type: application/json' \
+      -d '{"input":"hi","agent":"claude-code","stream":true}'
+}

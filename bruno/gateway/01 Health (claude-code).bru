@@ -1,0 +1,36 @@
+meta {
+  name: 01 Health (claude-code)
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{baseUrl}}/v1/health?agent=claude-code
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: claude-code
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("reports Claude Code health", function () {
+    expect(res.body.ok).to.equal(true);
+    expect(res.body.agent).to.equal("claude-code");
+    expect(res.body.healthy).to.be.a("boolean");
+  });
+}
+
+docs {
+  Liveness + whether the Claude Code harness backend is reachable, selected
+  with `?agent=claude-code`. The gateway runs the Claude Code CLI through the
+  Claude Agent SDK on Claude Code's own login. `healthy` is false until this
+  machine has Claude Code installed (`claude` on PATH, or CLAUDE_CODE_BIN) and
+  logged in (`claude auth login`, or ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN
+  in the gateway's environment).
+}

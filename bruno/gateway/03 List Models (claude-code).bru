@@ -1,0 +1,37 @@
+meta {
+  name: 03 List Models (claude-code)
+  type: http
+  seq: 17
+}
+
+get {
+  url: {{baseUrl}}/v1/models?agent=claude-code
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: claude-code
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("is a Claude Code model list", function () {
+    expect(res.body.object).to.equal("list");
+    expect(res.body.agent).to.equal("claude-code");
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The models the Claude Code harness can run, selected with
+  `?agent=claude-code` (`hermes` | `openclaw` | `claude-code`). Omit the
+  filter (see "03 List Models") for the gateway's configured default. This is
+  a fixed set of Claude Code's own model aliases (sonnet, opus, fable, haiku),
+  not a live catalog call. Needs Claude Code installed on this machine
+  (`claude` on PATH, or CLAUDE_CODE_BIN): otherwise the gateway returns
+  503 agent_unavailable.
+}
