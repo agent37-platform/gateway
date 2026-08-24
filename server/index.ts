@@ -95,6 +95,7 @@ async function shutdown(reason: ShutdownReason, exitCode = 0): Promise<void> {
     closeHttpServer(),
     adapter.stop?.() ?? Promise.resolve(),
     getAdapter('openclaw').stop?.() ?? Promise.resolve(),
+    getAdapter('claude-code').stop?.() ?? Promise.resolve(),
   ]);
   for (const result of results) {
     if (result.status === 'rejected') console.error(result.reason);

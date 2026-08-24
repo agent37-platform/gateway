@@ -1,0 +1,30 @@
+meta {
+  name: 12 Delete Session (claude-code)
+  type: http
+  seq: 24
+}
+
+delete {
+  url: {{baseUrl}}/v1/sessions/{{claudeCodeSessionId}}?agent=claude-code
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: claude-code
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("deleted", function () {
+    expect(res.body.deleted).to.equal(true);
+  });
+}
+
+docs {
+  Permanently remove the Claude Code session's transcript from Claude Code's
+  own store. Other sessions on the instance are untouched.
+}

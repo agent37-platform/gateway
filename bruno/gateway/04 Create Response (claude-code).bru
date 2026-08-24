@@ -1,0 +1,57 @@
+meta {
+  name: 04 Create Response (claude-code)
+  type: http
+  seq: 18
+}
+
+post {
+  url: {{baseUrl}}/v1/responses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": "What is the time now in IST?",
+    "agent": "claude-code",
+    "reasoning_effort": "low"
+  }
+}
+
+script:post-response {
+  if (res.status === 200 && res.body) {
+    if (res.body.session_id) bru.setEnvVar("claudeCodeSessionId", res.body.session_id, { persist: true });
+    if (res.body.id) bru.setEnvVar("claudeCodeResponseId", res.body.id, { persist: true });
+  }
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("completed with text", function () {
+    expect(res.body.id).to.be.a("string");
+    expect(res.body.session_id).to.be.a("string");
+    expect(res.body.status).to.equal("completed");
+    expect(res.body.agent).to.equal("claude-code");
+    expect(res.body.output_text).to.be.a("string");
+  });
+}
+
+docs {
+  Start a new Claude Code session. Pass `"agent": "claude-code"`: the gateway
+  runs the Claude Code CLI through the Claude Agent SDK on Claude Code's own
+  login, one `claude` process per turn.
+
+  The reply saves `claudeCodeSessionId` and `claudeCodeResponseId` to the
+  environment so the follow-up requests below can reuse them.
+
+  Claude Code must be installed on this machine (`claude` on PATH, or
+  CLAUDE_CODE_BIN) and logged in (`claude auth login`, or ANTHROPIC_API_KEY /
+  CLAUDE_CODE_OAUTH_TOKEN in the gateway's environment).
+}

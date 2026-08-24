@@ -1,0 +1,35 @@
+meta {
+  name: 09 List Sessions (claude-code)
+  type: http
+  seq: 21
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions?agent=claude-code
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: claude-code
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("claude-code sessions", function () {
+    expect(res.body.agent).to.equal("claude-code");
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The Claude Code chat sessions on this instance, selected with
+  `?agent=claude-code` (`hermes` | `openclaw` | `claude-code`), projected from
+  Claude Code's own session store (`~/.claude/projects/...`) as
+  `{ agent, data }`. Omitting `?agent=` falls back to the instance's default
+  harness: not a merged listing. Unknown agent values return a
+  400 validation_error.
+}

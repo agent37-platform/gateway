@@ -8,9 +8,8 @@ work back, and keeps the conversation going. The streaming contract and request
 shape are the same whatever agent is behind it — so client code doesn't change
 when the agent does.
 
-Today it routes to **Hermes** (the default) and **OpenClaw** — pick per request
-with the `agent` field. The adapter seam is built so **Claude Code** slots in
-next.
+Today it routes to **Hermes** (the default), **OpenClaw**, and **Claude Code**:
+pick per request with the `agent` field.
 
 > Want the hosted API? Use [Agent37 Cloud](https://www.agent37.com/cloud). This
 > repo is the gateway service that powers an Agent37 agent.
@@ -84,6 +83,50 @@ other than `http://localhost:18789`, set `OPENCLAW_BASE_URL` too. No OpenClaw
 config changes are needed — the WebSocket gateway is OpenClaw's always-on
 native surface.
 
+## How it talks to Claude Code
+
+The Claude Code adapter drives the Claude Code CLI through the
+[Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk):
+one `query()` (one `claude` process) per turn, resumed by session id, in
+`bypassPermissions` mode so tools run unprompted (the instance is the customer's
+own box, as with the other harnesses). Text and thinking deltas, tool calls and
+tool results stream back as the same SSE events, and cancel is real
+(`interrupt()` stops the run inside Claude Code).
+
+Transcripts live where Claude Code keeps them (`~/.claude/projects/<cwd>/<id>.jsonl`,
+keyed by the gateway's workspace directory) and the gateway keeps no index:
+`GET /v1/sessions?agent=claude-code` lists that store (Claude Code's own title,
+custom or auto-generated, as `title`; the first prompt as `preview`),
+`GET /v1/sessions/{id}` projects the transcript, `PATCH /v1/sessions/{id}`
+(rename) writes Claude Code's custom title (its `/rename`), and
+`DELETE /v1/sessions/{id}` removes the transcript. A gateway session id is the
+Claude Code session UUID with the dashes removed, so a session started from a
+terminal in the workspace directory shows up in the list too.
+
+The gateway passes no credential: Claude Code runs on its own login. Until one
+exists, a turn fails with `auth_error` (and a hint to log in) and
+`GET /v1/health?agent=claude-code` reports `healthy: false`.
+
+`GET /v1/models?agent=claude-code` lists Claude Code's model aliases (`sonnet`,
+`opus`, `fable`, `haiku`, each the latest of its family); a turn's `model` is
+passed through as is, and `reasoning_effort` maps onto Claude Code's effort
+level (`none|minimal|low` → `low`, `medium|high|xhigh` unchanged). `usage`
+(cost included) and `context` come from Claude Code's own per-turn result.
+
+### Set up Claude Code
+
+Install Claude Code on the machine the gateway runs on and log in:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude auth login
+```
+
+Then route any turn to it with `"agent": "claude-code"`. The adapter runs the
+`claude` on `PATH`; set `CLAUDE_CODE_BIN` to pin a specific binary. An
+`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (what `claude setup-token`
+prints) in the gateway's environment works instead of the interactive login.
+
 ## Quickstart
 
 **Prerequisites:**
@@ -134,7 +177,7 @@ behind the host, which handles and forwards authentication.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `input` | string, required | The message or task. |
-| `agent` | string | `hermes` or `openclaw`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
+| `agent` | string | `hermes`, `openclaw`, or `claude-code`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
 | `session_id` | string | Continue a conversation. Omit to start a new one. |
 | `files` | string[] | Absolute paths of files to attach (write them first with `PUT /v1/files/content`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
@@ -189,9 +232,9 @@ running response as `active_response_id`.
 
 | Action | Endpoint |
 | --- | --- |
-| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
+| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw\|claude-code`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
 | Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history, context }` (`?agent=` to pick the harness; `context` is the session's last reported context window, null until a turn reports one) |
-| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label). A harness without an editable title answers `405 rename_unsupported`. |
+| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label; Claude Code stores it as its custom session title). A harness without an editable title answers `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |
 
 `active_response_id` is the id of the `in_progress` response on the session, or
@@ -275,13 +318,14 @@ and stored paths assume the instance's home directory stays stable.
 
 | Action | Endpoint |
 | --- | --- |
-| Models a harness can run | `GET /v1/models` (configured default; add `?agent=hermes\|openclaw` to target one) |
-| Liveness + harness reachability | `GET /v1/health` (configured default; add `?agent=hermes\|openclaw` to target one) |
+| Models a harness can run | `GET /v1/models` (configured default; add `?agent=hermes\|openclaw\|claude-code` to target one) |
+| Liveness + harness reachability | `GET /v1/health` (configured default; add `?agent=hermes\|openclaw\|claude-code` to target one) |
 | Version | `GET /v1/version` |
 
 `GET /v1/health` reports on the gateway's configured default harness, or the
 one named by an optional `?agent=` query param. It returns `{ ok, agent,
-healthy }`, plus a legacy `hermes` field when Hermes is probed.
+healthy }`, plus a legacy `hermes` field when Hermes is probed. For Claude Code,
+`healthy` also means it is logged in.
 
 `GET /v1/models` returns the OpenAI list shape, so any OpenAI-compatible client
 works. It lists the models of one harness — the configured default, or the one
@@ -352,7 +396,9 @@ npm test          # integration suite against the real local Hermes worker/LLM
 state dir. Response tests call the local Hermes worker and configured LLM; the
 suite also covers replay, `session_busy`, cancel, history, and
 error bodies. The OpenClaw tests run against a local OpenClaw gateway and are
-skipped automatically when none is running.
+skipped automatically when none is running; the Claude Code tests run the
+Claude Code CLI installed on this machine, on its own login, and are skipped
+when it isn't installed or logged in.
 
 ### Poke it by hand (Bruno)
 
@@ -361,7 +407,8 @@ open that folder in Bruno, pick the **local** environment (`baseUrl`
 `http://localhost:3737`), and run the requests top to bottom. *Create Response*
 saves the `session_id` and response id into the environment, so *Continue
 Session*, *Cancel*, and *Delete Session* just work. The
-*(openclaw)* requests do the same for OpenClaw (start `openclaw` locally first).
+*(openclaw)* requests do the same for OpenClaw (start `openclaw` locally first),
+and the *(claude-code)* requests for Claude Code (installed and logged in).
 *Upload File* writes a file via `PUT /v1/files/content` and saves its path for
 *Download File*.
 
@@ -371,12 +418,13 @@ All optional — see [`.env.example`](.env.example). Highlights: `PORT` (3737),
 `HOST` (0.0.0.0), `GATEWAY_DEFAULT_AGENT` (the harness a turn routes to when the
 request omits `agent`; `hermes` by default), `AGENT37_GATEWAY_HOME`
 (`~/.agent37-gateway`), the `HERMES_*` variables that locate the Hermes install,
-and `OPENCLAW_BASE_URL` / `OPENCLAW_TOKEN` for the OpenClaw route.
+`OPENCLAW_BASE_URL` / `OPENCLAW_TOKEN` for the OpenClaw route, and
+`CLAUDE_CODE_BIN` for the Claude Code route.
 
 ## Roadmap
 
 - **`goal` mode** — autonomous, multi-turn runs (the worker primitives are in place).
-- **More adapters** — Claude Code, behind the same `AgentAdapter` seam.
+- **More adapters**, behind the same `AgentAdapter` seam.
 
 ## License
 

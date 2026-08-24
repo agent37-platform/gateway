@@ -2,15 +2,17 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startTestServer, type TestServer } from './test-helpers.js';
 
-// Point the OpenClaw adapter at a dead port so its backend is unreachable —
-// the same shape as targeting a harness that isn't provisioned on this
-// instance. node:test isolates each file in its own process, so this env
-// override doesn't leak into the other suites.
+// Point the OpenClaw adapter at a dead port and the Claude Code adapter at a
+// missing binary so their backends are unreachable — the same shape as
+// targeting a harness that isn't provisioned on this instance. node:test
+// isolates each file in its own process, so these env overrides don't leak
+// into the other suites.
 let server: TestServer | undefined;
 let base: string;
 
 before(async () => {
   process.env.OPENCLAW_BASE_URL = 'http://127.0.0.1:59321';
+  process.env.CLAUDE_CODE_BIN = '/nonexistent/claude';
   server = await startTestServer();
   base = server.base;
 });
@@ -38,4 +40,25 @@ test('a turn for an unreachable harness settles as failed with agent_unavailable
   const body = (await res.json()) as { status: string; error: { code: string } | null };
   assert.equal(body.status, 'failed');
   assert.equal(body.error?.code, 'agent_unavailable');
+});
+
+test('a claude-code request without the claude binary fails with agent_unavailable', async () => {
+  const models = await fetch(`${base}/v1/models?agent=claude-code`);
+  assert.equal(models.status, 503);
+  const modelsBody = (await models.json()) as { error: { code: string; message: string } };
+  assert.equal(modelsBody.error.code, 'agent_unavailable');
+  assert.match(modelsBody.error.message, /claude-code/);
+
+  const turn = await fetch(`${base}/v1/responses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent: 'claude-code', input: 'hello' }),
+  });
+  assert.equal(turn.status, 200);
+  const body = (await turn.json()) as { status: string; error: { code: string } | null };
+  assert.equal(body.status, 'failed');
+  assert.equal(body.error?.code, 'agent_unavailable');
+
+  const health = (await (await fetch(`${base}/v1/health?agent=claude-code`)).json()) as { healthy: boolean };
+  assert.equal(health.healthy, false);
 });

@@ -1,0 +1,42 @@
+meta {
+  name: 05 Continue Session (claude-code)
+  type: http
+  seq: 19
+}
+
+post {
+  url: {{baseUrl}}/v1/responses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "session_id": "{{claudeCodeSessionId}}",
+    "input": "In one short sentence, what did I just ask you to say?",
+    "agent": "claude-code",
+    "reasoning_effort": "low"
+  }
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("same session, completed", function () {
+    expect(res.body.session_id).to.equal(bru.getEnvVar("claudeCodeSessionId"));
+    expect(res.body.status).to.equal("completed");
+    expect(res.body.agent).to.equal("claude-code");
+  });
+}
+
+docs {
+  Continue a Claude Code conversation. Reuses `claudeCodeSessionId` saved by
+  "04 Create Response (claude-code)". Always include `"agent": "claude-code"`
+  so the gateway routes the turn to the right backend.
+}

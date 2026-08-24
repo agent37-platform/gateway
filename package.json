@@ -1,7 +1,7 @@
 {
   "name": "agent37-gateway",
-  "version": "0.8.3",
-  "description": "A unified, Responses-style adapter API that runs on each instance and routes each turn to the harness it targets. Hermes and OpenClaw today; Claude Code next.",
+  "version": "0.9.0",
+  "description": "A unified, Responses-style adapter API that runs on each instance and routes each turn to the harness it targets: Hermes, OpenClaw, or Claude Code.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -30,6 +30,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.241",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2"

@@ -1,0 +1,34 @@
+meta {
+  name: 10 Get Session (claude-code history)
+  type: http
+  seq: 22
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions/{{claudeCodeSessionId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("includes transcript history", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("claudeCodeSessionId"));
+    expect(res.body.agent).to.equal("claude-code");
+    expect(res.body.history).to.be.an("array");
+  });
+}
+
+docs {
+  The Claude Code session plus its transcript. Reuses `claudeCodeSessionId`
+  saved by "04 Create Response (claude-code)". History is projected on demand
+  from Claude Code's own transcript file
+  (`~/.claude/projects/.../<uuid>.jsonl`): the gateway never duplicates
+  messages.
+
+  Claude Code must have written that transcript for history to be non-empty;
+  otherwise `history` comes back as an empty array.
+}

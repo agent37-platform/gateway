@@ -33,6 +33,7 @@ export async function startTestServer(): Promise<TestServer> {
       shutdownLiveRuns();
       await adapter.stop?.();
       await getAdapter('openclaw').stop?.();
+      await getAdapter('claude-code').stop?.();
     },
   };
 }
