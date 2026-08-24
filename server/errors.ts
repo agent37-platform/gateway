@@ -127,7 +127,7 @@ const WORKER_CODE_MAP: Record<string, { status: number; apiCode: string }> = {
   task_busy: { status: 409, apiCode: 'session_busy' },
   title_conflict: { status: 409, apiCode: 'title_conflict' },
   rate_limit: { status: 429, apiCode: 'rate_limited' },
-  hermes_not_found: { status: 503, apiCode: 'hermes_not_found' },
+  hermes_not_found: { status: 503, apiCode: 'agent_unavailable' },
   import_error: { status: 503, apiCode: 'import_error' },
   session_db_unavailable: { status: 503, apiCode: 'session_db_unavailable' },
   session_load_error: { status: 503, apiCode: 'session_load_error' },
@@ -151,12 +151,20 @@ const UNREACHABLE_SYSCALLS = new Set([
   'ECONNREFUSED', 'ENOENT', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT',
 ]);
 
+// Worker codes that mean the same thing at the harness layer: the Hermes worker
+// starts fine (it is plain Python) but finds no Hermes install on this instance
+// — e.g. `agent: "hermes"` on an OpenClaw image.
+const UNPROVISIONED_WORKER_CODES = new Set(['hermes_not_found']);
+
 /** True when an error (or its `cause` — Node's fetch nests the system error
- *  there) is a connection-level failure to reach a harness backend. */
+ *  there) says the harness backend isn't on this instance: a connection-level
+ *  failure to reach it, or the worker reporting no install to load. */
 function isBackendUnreachable(error: unknown): boolean {
   for (const e of [error, (error as { cause?: unknown })?.cause]) {
     const code = (e as { code?: unknown })?.code;
-    if (typeof code === 'string' && UNREACHABLE_SYSCALLS.has(code)) return true;
+    if (typeof code === 'string' && (UNREACHABLE_SYSCALLS.has(code) || UNPROVISIONED_WORKER_CODES.has(code))) {
+      return true;
+    }
   }
   return false;
 }

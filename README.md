@@ -334,7 +334,7 @@ Every error returns a stable, machine-readable body. Branch on `code`, show
 | `payload_too_large` | 413 | Request body exceeded the size limit. |
 | `rate_limited` | 429 | The upstream agent/provider was rate-limited. |
 | `agent_error` | 502 | The agent backend failed (auth, model, provider, etc.). |
-| `agent_unavailable` | 503 | The targeted harness backend isn't available on this instance — never provisioned here, or down. |
+| `agent_unavailable` | 503 | The targeted harness backend isn't available on this instance — never provisioned here (including an image with no Hermes install), or down. |
 | `internal_error` | 500 | An unexpected gateway error. |
 
 Agent/worker failures surface their own `code` and `hint` where available (e.g.
