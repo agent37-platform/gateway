@@ -63,7 +63,7 @@ PENDING_INTERRUPTS: dict[str, str] = {}
 ACTIVE_TASKS_LOCK = threading.Lock()
 DEFAULT_INTERRUPT_REASON = "Stopped by user"
 
-ALLOWED_REASONING = {"none", "minimal", "low", "medium", "high", "xhigh"}
+ALLOWED_REASONING = {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
 
 # Hermes ships an interactive `clarify` tool that blocks the agent loop until a
 # human answers inside the same turn (CLI arrow keys, Telegram buttons). The

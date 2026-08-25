@@ -1,6 +1,6 @@
 {
   "name": "agent37-gateway",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "A unified, Responses-style adapter API that runs on each instance and routes each turn to the harness it targets: Hermes, OpenClaw, or Claude Code.",
   "license": "MIT",
   "type": "module",

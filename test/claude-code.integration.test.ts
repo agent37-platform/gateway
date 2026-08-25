@@ -6,9 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startTestServer, postJson, SseReader, type TestServer } from './test-helpers.js';
 
-// --- Claude Code adapter (needs the Claude Code CLI on this machine, logged
-// in on its own account; skipped otherwise — the same shape as the OpenClaw
-// probe). Turns run on that login, so they cost real usage.
+// --- Claude Code adapter. Unlike the OpenClaw probe (optional harness, its
+// tests skip), Claude Code ships in the images this repo releases into, so a
+// missing or logged-out CLI FAILS the suite via the gate test below instead of
+// silently green-lighting an untested harness. Turns run on that login, so
+// they cost real usage.
 
 const claudeCodeSkip = await new Promise<false | string>((resolve) => {
   execFile(process.env.CLAUDE_CODE_BIN?.trim() || 'claude', ['auth', 'status', '--json'], { timeout: 15_000 }, (error, stdout) => {
@@ -53,6 +55,10 @@ async function jsonOk<T>(res: Response): Promise<T> {
   assert.equal(res.status, 200, JSON.stringify(body));
   return body as T;
 }
+
+test('Claude Code CLI is installed and logged in (required — its tests must run)', () => {
+  assert.equal(claudeCodeSkip, false, `Claude Code tests did not run: ${claudeCodeSkip}. Install the CLI and \`claude auth login\` — a green suite must include this harness.`);
+});
 
 test('claude-code responses complete, resume, and manage sessions on Claude Code\'s own store', { skip: claudeCodeSkip }, async () => {
   const marker = `claude-code-marker-${Date.now()}`;
