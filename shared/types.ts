@@ -25,12 +25,17 @@ export const DEFAULT_AGENT: AgentType = 'hermes';
 
 /** The DEFAULT harness a request routes to when it omits `agent`.
  *  GATEWAY_DEFAULT_AGENT names it (the OpenClaw image sets it to "openclaw"); a
- *  request can still target any supported harness via `agent`. Unset or unknown
- *  falls back to DEFAULT_AGENT, preserving Hermes-image behavior. This is the
- *  default only, not a one-backend-per-instance limit. */
+ *  request can still target any supported harness via `agent`. Unset falls back
+ *  to DEFAULT_AGENT; a value that names no known harness fails at boot, so a
+ *  typo cannot silently reroute every turn to Hermes. This is the default only,
+ *  not a one-backend-per-instance limit. */
 export function resolveConfiguredDefaultAgent(raw: string | undefined | null): AgentType {
   const value = (raw ?? '').trim();
-  return (SUPPORTED_AGENTS as readonly string[]).includes(value) ? (value as AgentType) : DEFAULT_AGENT;
+  if (!value) return DEFAULT_AGENT;
+  if (!(SUPPORTED_AGENTS as readonly string[]).includes(value)) {
+    throw new Error(`GATEWAY_DEFAULT_AGENT is "${value}"; it must be one of: ${SUPPORTED_AGENTS.join(', ')} (or unset).`);
+  }
+  return value as AgentType;
 }
 
 /** Safety cap for goal mode. Keep in sync with GOAL_MAX_TURNS in hermes_worker.py. */
