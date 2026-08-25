@@ -35,15 +35,19 @@ const MODEL_CATALOG_TTL_MS = 60_000;
 // this, so it is the session's real effective window, not a guess.
 const OPENCLAW_DEFAULT_CONTEXT_WINDOW = 128_000;
 
-// Our reasoning efforts map 1:1 onto OpenClaw thinking levels ('none' → 'off');
-// OpenClaw additionally knows max/ultra/adaptive, which we never send.
-const THINKING_MAP: Record<string, string> = {
+// Our reasoning efforts map 1:1 onto OpenClaw thinking levels ('none' → 'off').
+// OpenClaw's 'ultra' is provider max plus proactive subagent orchestration —
+// its Ultra mode, which is the point of ours. Only its 'adaptive' has no
+// gateway spelling. Exported for the mapping tests.
+export const THINKING_MAP: Record<string, string> = {
   none: 'off',
   minimal: 'minimal',
   low: 'low',
   medium: 'medium',
   high: 'high',
   xhigh: 'xhigh',
+  max: 'max',
+  ultra: 'ultra',
 };
 
 function baseUrl(): string {

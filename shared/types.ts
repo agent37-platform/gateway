@@ -10,7 +10,10 @@
 // Shared scalars
 // ---------------------------------------------------------------------------
 
-export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+/** `max` is the top plain thinking level; `ultra` is the harness's own Ultra
+ *  mode — top thinking plus agentic orchestration (Hermes `ultra`, OpenClaw
+ *  `ultra`, Claude Code ultracode). */
+export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
 /** Response modes. `chat` runs one turn; `goal` is reserved for a fast-follow. */

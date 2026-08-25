@@ -83,6 +83,18 @@ class CreateAgentKwargsTest(unittest.TestCase):
         self.assertIn("end the turn", hint)
         self.assertIn("no interactive clarify tool", hint)
 
+    def test_ultra_reasoning_reaches_the_agent(self):
+        # The top rungs (max/ultra) must survive the worker's own gate and land
+        # on AIAgent's reasoning_config.
+        with mock.patch.object(
+            hermes_worker, "_AIAgent_PARAMS", set(hermes_worker._AIAgent_PARAMS) | {"reasoning_config"}
+        ):
+            hermes_worker._create_agent(
+                session_id="s2", requested_model="test-model", reasoning_effort="ultra",
+            )
+        kwargs = _RecordingAgent.calls[-1]
+        self.assertEqual(kwargs.get("reasoning_config"), {"enabled": True, "effort": "ultra"})
+
 
 if __name__ == "__main__":
     unittest.main()

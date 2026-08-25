@@ -32,7 +32,7 @@ Both must pass. Never open a PR on a red or un-run suite — fix the code (or th
 
 The OpenClaw tests in the suite auto-skip when no local OpenClaw gateway is running. If your change touches the OpenClaw adapter or routing, start OpenClaw locally (`openclaw start`, port 18789) so those tests actually run. The adapter speaks OpenClaw's WebSocket gateway RPC and needs one thing from `~/.openclaw/openclaw.json`: its `gateway.auth.token` copied into `OPENCLAW_TOKEN` in your `.env`. See "Set up OpenClaw" in `README.md`.
 
-The Claude Code tests likewise auto-skip unless the Claude Code CLI is installed here and logged in (`claude auth login`); they run on that login. If your change touches the Claude Code adapter, make sure they actually run.
+The Claude Code tests are NOT optional: a missing or logged-out Claude Code CLI fails the suite (Claude Code ships in the release images, so a green run must include it). Install the CLI and `claude auth login`; the tests run on that login.
 
 ## Releases
 

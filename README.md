@@ -67,7 +67,8 @@ archives the transcript off its active path), and `PATCH /v1/sessions/{id}`
 (`sessions.patch`) — set when chosen, never cleared, so a model picked through
 OpenClaw's own surfaces isn't clobbered by turns that don't choose — and
 `reasoning_effort` maps onto OpenClaw's per-turn thinking level
-(`none|minimal|low|medium|high|xhigh` → `off|minimal|low|medium|high|xhigh`).
+(`none` → `off`, the rest pass through; OpenClaw's `ultra` is provider `max`
+plus proactive subagent orchestration).
 
 ### Set up OpenClaw
 
@@ -109,8 +110,10 @@ exists, a turn fails with `auth_error` (and a hint to log in) and
 
 `GET /v1/models?agent=claude-code` lists Claude Code's model aliases (`sonnet`,
 `opus`, `fable`, `haiku`, each the latest of its family); a turn's `model` is
-passed through as is, and `reasoning_effort` maps onto Claude Code's effort
-level (`none|minimal|low` → `low`, `medium|high|xhigh` unchanged). `usage`
+passed through as is, and `reasoning_effort` maps onto Claude Code's dials
+(`none` → thinking disabled, `minimal|low` → effort `low`,
+`medium|high|xhigh|max` → the same effort, `ultra` → ultracode: `xhigh` effort
+plus standing multi-agent workflow orchestration). `usage`
 (cost included) and `context` come from Claude Code's own per-turn result.
 
 ### Set up Claude Code
@@ -182,7 +185,7 @@ behind the host, which handles and forwards authentication.
 | `files` | string[] | Absolute paths of files to attach (write them first with `PUT /v1/files/content`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
 | `model` / `provider` | string | The LLM to run on. List options at `GET /v1/models`. |
-| `reasoning_effort` | string | `none` … `xhigh`. |
+| `reasoning_effort` | string | `none` … `ultra` (`max` = top plain thinking; `ultra` = top thinking plus the harness's orchestration mode). |
 | `mode` | string | `chat` (default). `goal` is reserved (returns `validation_error` for now). |
 | `metadata` | object | Up to 16 key/value pairs, echoed back. |
 

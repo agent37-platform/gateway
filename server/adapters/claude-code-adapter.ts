@@ -9,6 +9,7 @@ import {
   listSessions as listClaudeSessions,
   query,
   renameSession as renameClaudeSession,
+  type Options,
   type Query,
   type SDKAssistantMessage,
   type SDKAssistantMessageError,
@@ -45,15 +46,27 @@ const INTERRUPT_GRACE_MS = 5_000;
 const LOGIN_HINT =
   'Run `claude auth login` in the instance terminal, or set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in the environment.';
 
-// Claude Code's effort levels are a subset of ours (no none/minimal).
-const EFFORT_MAP: Record<ReasoningEffort, 'low' | 'medium' | 'high' | 'xhigh'> = {
-  none: 'low',
+// Claude Code's effort ladder (low…max) has no none/minimal: `none` turns
+// thinking off outright, `minimal` rounds up to its floor of low.
+const EFFORT_MAP: Record<Exclude<ReasoningEffort, 'none' | 'ultra'>, 'low' | 'medium' | 'high' | 'xhigh' | 'max'> = {
   minimal: 'low',
   low: 'low',
   medium: 'medium',
   high: 'high',
   xhigh: 'xhigh',
+  max: 'max',
 };
+
+/** The query() options one reasoning effort turns into. `ultra` is ultracode —
+ *  Claude Code's own Ultra mode: xhigh effort plus standing multi-agent
+ *  workflow orchestration, session-scoped, so per-turn here (one query() per
+ *  turn). Exported for the mapping tests. */
+export function effortOptions(effort: ReasoningEffort | null | undefined): Pick<Options, 'effort' | 'thinking' | 'settings'> {
+  if (!effort) return {};
+  if (effort === 'none') return { thinking: { type: 'disabled' } };
+  if (effort === 'ultra') return { effort: 'xhigh', settings: { ultracode: true } };
+  return { effort: EFFORT_MAP[effort] };
+}
 
 // Claude Code has no model catalog call; its own /model picker is this fixed
 // set of aliases, each resolving to the latest model of its family.
@@ -308,7 +321,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         // workspace must not reconfigure server turns.
         settingSources: ['user'],
         ...(settings?.model ? { model: settings.model } : {}),
-        ...(settings?.reasoningEffort ? { effort: EFFORT_MAP[settings.reasoningEffort] } : {}),
+        ...effortOptions(settings?.reasoningEffort),
         abortController: abort,
         stderr: (chunk) => {
           stderrTail = (stderrTail + chunk).slice(-4096);
@@ -488,9 +501,13 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       model: null,
     };
     // Usage rides on every per-block row of an API message; count each message once.
+    // Anthropic bills thinking inside output_tokens and the transcript keeps only
+    // the thinking text, so reasoning_tokens is the usual chars/4 estimate.
     const seen = new Set<string>();
+    let thinkingChars = 0;
     for (const row of rows) {
       if (row.type !== 'assistant' || row.parent_tool_use_id) continue;
+      thinkingChars += thinkingOf((row.message as { content?: unknown }).content).length;
       const message = row.message as { id?: string; model?: string; usage?: ApiUsage };
       if (!message.usage || !message.id || seen.has(message.id)) continue;
       seen.add(message.id);
@@ -500,6 +517,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       meta.cache_write_tokens += message.usage.cache_creation_input_tokens ?? 0;
       if (message.model && !message.model.startsWith('<')) meta.model = message.model;
     }
+    meta.reasoning_tokens = Math.round(thinkingChars / 4);
     return meta;
   }
 
