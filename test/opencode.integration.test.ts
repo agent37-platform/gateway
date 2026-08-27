@@ -126,8 +126,22 @@ test('opencode responses complete, resume, and manage sessions on OpenCode\'s ow
   assert.ok(row, 'created session appears in the list');
   assert.equal(typeof row.last_active, 'number');
 
-  // Rename writes OpenCode's session title; it reads back as the row title and
-  // survives a following turn (OpenCode auto-titles only the first turn).
+  // OpenCode auto-titles the first turn asynchronously (an LLM summary that can
+  // land seconds later). Wait for it to replace the "New session …" placeholder
+  // before renaming, so that one-shot auto-title can't clobber the rename after
+  // the fact; then the write/read below is the gateway's own contract.
+  const titleRow = async (): Promise<string | null> => {
+    const list = await jsonOk<{ data: Array<{ id: string; title: string | null }> }>(
+      await fetch(`${base}/v1/sessions?agent=opencode`),
+    );
+    return list.data.find((s) => s.id === created.session_id)?.title ?? null;
+  };
+  for (let i = 0; i < 30; i++) {
+    const t = await titleRow();
+    if (t && !/^New session/.test(t)) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+
   const title = `integration-rename-${marker}`;
   const rename = await jsonOk<{ renamed: boolean }>(
     await fetch(`${base}/v1/sessions/${created.session_id}?agent=opencode`, {
@@ -137,13 +151,7 @@ test('opencode responses complete, resume, and manage sessions on OpenCode\'s ow
     }),
   );
   assert.equal(rename.renamed, true);
-  await jsonOk<ResponseBody>(
-    await postJson(base, { agent: 'opencode', model, session_id: created.session_id, input: 'Reply with just OK.', reasoning_effort: 'low' }),
-  );
-  const renamedList = await jsonOk<{ data: Array<{ id: string; title: string | null }> }>(
-    await fetch(`${base}/v1/sessions?agent=opencode`),
-  );
-  assert.equal(renamedList.data.find((s) => s.id === created.session_id)?.title, title);
+  assert.equal(await titleRow(), title);
 
   // Models are OpenCode's provider catalog, each owned by its provider.
   const models = await jsonOk<{ agent: string; data: Array<{ id: string; owned_by: string; source: string }> }>(
@@ -193,6 +201,13 @@ test('opencode responses complete, resume, and manage sessions on OpenCode\'s ow
   const madeUpBody = (await madeUp.json()) as { error: { code: string; param?: string } };
   assert.equal(madeUpBody.error.code, 'validation_error');
   assert.equal(madeUpBody.error.param, 'session_id');
+
+  // A bare/malformed model id is rejected, not silently run on the default and
+  // mislabelled as the requested model.
+  const badModel = await jsonOk<ResponseBody>(await postJson(base, { agent: 'opencode', model: 'not-a-real-model', input: 'hi' }));
+  assert.equal(badModel.status, 'failed');
+  assert.equal(badModel.error?.code, 'model_error');
+  await fetch(`${base}/v1/sessions/${badModel.session_id}?agent=opencode`, { method: 'DELETE' });
 });
 
 test('an in-flight opencode turn can be cancelled', { skip: opencodeSkip }, async () => {

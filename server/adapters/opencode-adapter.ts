@@ -261,6 +261,21 @@ export class OpenCodeAdapter implements AgentAdapter {
       return;
     }
 
+    // A model must be one of OpenCode's own "provider/model" ids (as listed by
+    // GET /v1/models?agent=opencode). Reject a bare or malformed id rather than
+    // silently dropping it and running the default while the response mislabels
+    // it as the requested model.
+    const settings = options?.settings;
+    const model = splitModel(settings?.model);
+    if (settings?.model && !model) {
+      yield {
+        type: 'error',
+        code: 'model_error',
+        error: `model '${settings.model}' must be in "provider/model" form (see GET /v1/models?agent=opencode).`,
+      };
+      return;
+    }
+
     const client = await this.child.acquire();
     const turn: ActiveTurn = {
       client,
@@ -275,6 +290,9 @@ export class OpenCodeAdapter implements AgentAdapter {
     const toolsRunning = new Set<string>(); // partIDs that have emitted `running`
     const assistantMsgs = new Map<string, OpenCodeAssistantMessage>(); // id → latest
     let streamError: OpenCodeErrorInfo | undefined;
+    // The text streamed via deltas so far, reconciled against the prompt
+    // result's final parts at the end so a dropped SSE can't truncate output.
+    let streamedText = '';
 
     let idleTimer: NodeJS.Timeout | undefined;
     const resetIdle = (): void => {
@@ -295,10 +313,8 @@ export class OpenCodeAdapter implements AgentAdapter {
     });
     resetIdle();
 
-    // Effort/model resolution needs the model's advertised variants, so refresh
-    // the providers cache before firing (cheap and cached 60s).
-    const settings = options?.settings;
-    const model = splitModel(settings?.model);
+    // Effort resolution needs the model's advertised variants, so refresh the
+    // providers cache before firing (cheap and cached 60s).
     let variant: string | undefined;
     try {
       const providers = await this.loadProviders(client);
@@ -366,7 +382,10 @@ export class OpenCodeAdapter implements AgentAdapter {
             // the part type registered from message.part.updated.
             const type = partTypes.get(props.partID as string);
             if (type === 'reasoning') yield { type: 'thinking_delta', content: delta };
-            else if (type === 'text') yield { type: 'text_delta', content: delta };
+            else if (type === 'text') {
+              streamedText += delta;
+              yield { type: 'text_delta', content: delta };
+            }
             break;
           }
           case 'message.updated': {
@@ -415,6 +434,18 @@ export class OpenCodeAdapter implements AgentAdapter {
       }
       yield errorEvent(failure);
       return;
+    }
+
+    // The prompt result carries the turn's final text in its `text` parts. If
+    // the event stream dropped mid-turn, the streamed deltas are a prefix of it
+    // (or empty); emit the missing tail so `output_text` is never truncated. In
+    // the normal case the two match and nothing extra is sent.
+    const finalText = (settled.result.parts ?? [])
+      .filter((p) => p.type === 'text')
+      .map((p) => p.text ?? '')
+      .join('');
+    if (finalText.length > streamedText.length && finalText.startsWith(streamedText)) {
+      yield { type: 'text_delta', content: finalText.slice(streamedText.length) };
     }
 
     // Usage sums every assistant message of this turn (multi-step tool loops
