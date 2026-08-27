@@ -110,6 +110,15 @@ interface JsonRpcResponse {
 }
 
 const CLIENT_INFO = { name: 'agent37-gateway', title: 'Agent37 Gateway', version: '1' };
+// A control RPC (initialize, thread/*, model/list, account/read, turn/start's
+// ack) must answer promptly; without a cap a child that stays alive but never
+// replies would hang the HTTP response and hold the session lock open.
+const REQUEST_TIMEOUT_MS = Number(process.env.CODEX_REQUEST_TIMEOUT_MS) || 60_000;
+// A running turn streams notifications continuously (deltas, tool progress); if
+// none arrives for this long the turn is treated as stalled and the stream ends
+// so the session lock releases. Generous so a legitimately long silent tool run
+// isn't cut off.
+const TURN_IDLE_MS = Number(process.env.CODEX_TURN_IDLE_MS) || 300_000;
 
 export class CodexError extends Error {
   constructor(
@@ -180,17 +189,24 @@ export class CodexClient {
     // "never" and the sandbox is danger-full-access, so there is nothing to ask.
   }
 
-  request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  request<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
     if (this.closed) return Promise.reject(new CodexError('codex app-server is not running'));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new CodexError(`codex ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      timer.unref();
       this.pending.set(id, (res) => {
+        clearTimeout(timer);
         if (res.error) reject(new CodexError(res.error.message, res.error.code));
         else resolve(res.result as T);
       });
       try {
         this.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
       } catch (error) {
+        clearTimeout(timer);
         this.pending.delete(id);
         reject(error);
       }
@@ -285,13 +301,25 @@ export class CodexClient {
     onTurnId: (turnId: string) => void,
   ): AsyncIterable<Notification> {
     const queue = new AsyncQueue<Notification>();
+    // Watchdog: a turn that goes silent (no notification) for too long is
+    // treated as stalled and the stream is ended, releasing the session lock.
+    let idleTimer: NodeJS.Timeout | undefined;
+    const resetIdle = (): void => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => queue.end(), TURN_IDLE_MS);
+      idleTimer.unref();
+    };
     const unsubscribe = this.onNotification((n) => {
       if (n.method === 'app-server/exit') {
         queue.end();
         return;
       }
-      if (n.params.threadId === threadId) queue.push(n);
+      if (n.params.threadId === threadId) {
+        resetIdle();
+        queue.push(n);
+      }
     });
+    resetIdle();
     try {
       const res = await this.request<{ turn: CodexTurn }>('turn/start', {
         threadId,
@@ -310,6 +338,7 @@ export class CodexClient {
         if (n.method === 'turn/completed' && (n.params.turn as CodexTurn | undefined)?.id === turnId) break;
       }
     } finally {
+      clearTimeout(idleTimer);
       unsubscribe();
     }
   }

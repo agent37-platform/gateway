@@ -27,6 +27,10 @@ export class IdleChild<T> {
   private starting: Promise<T> | null = null;
   private inflight = 0;
   private idleTimer: NodeJS.Timeout | null = null;
+  // Bumped on every stop(); a spawn in flight when stop() ran checks this and
+  // kills the freshly-started child instead of publishing it, so teardown can't
+  // be outraced by a pending start (a subsequent acquire() starts a new one).
+  private generation = 0;
 
   constructor(private readonly opts: { idleMs: number; start: () => Promise<StartedChild<T>> }) {}
 
@@ -40,9 +44,16 @@ export class IdleChild<T> {
     try {
       if (this.current) return this.current.value;
       if (!this.starting) {
+        const startGeneration = this.generation;
         this.starting = this.opts
           .start()
           .then((started) => {
+            // A stop() landed while we were spawning: don't publish a child the
+            // teardown already reported killing — kill it here instead.
+            if (startGeneration !== this.generation) {
+              started.kill();
+              throw new Error('idle child start aborted by stop()');
+            }
             this.current = started;
             started.exited.then(() => {
               if (this.current === started) this.current = null;
@@ -66,8 +77,10 @@ export class IdleChild<T> {
     this.armIdle();
   }
 
-  /** Kill the child immediately and drop all in-flight accounting. */
+  /** Kill the child immediately and drop all in-flight accounting. A spawn in
+   *  flight is invalidated (see `generation`) so it can't republish a child. */
   async stop(): Promise<void> {
+    this.generation++;
     this.inflight = 0;
     this.killNow();
   }
