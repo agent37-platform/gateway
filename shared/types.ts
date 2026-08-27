@@ -19,7 +19,7 @@ export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 /** Response modes. `chat` runs one turn; `goal` is reserved for a fast-follow. */
 export const RESPONSE_MODES = ['chat', 'goal'] as const;
 
-export const SUPPORTED_AGENTS = ['hermes', 'openclaw', 'claude-code', 'codex'] as const;
+export const SUPPORTED_AGENTS = ['hermes', 'openclaw', 'claude-code', 'codex', 'opencode'] as const;
 export type AgentType = (typeof SUPPORTED_AGENTS)[number];
 export const DEFAULT_AGENT: AgentType = 'hermes';
 

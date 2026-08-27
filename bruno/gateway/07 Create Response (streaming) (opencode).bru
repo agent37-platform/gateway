@@ -1,0 +1,40 @@
+meta {
+  name: 07 Create Response (streaming) (opencode)
+  type: http
+  seq: 38
+}
+
+post {
+  url: {{baseUrl}}/v1/responses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": "Count from 1 to 5, one number per line.",
+    "agent": "opencode",
+    "reasoning_effort": "low",
+    "stream": true
+  }
+}
+
+docs {
+  Streaming is agent-agnostic: pass `"agent": "opencode"` alongside
+  `"stream": true` and the gateway streams the OpenCode turn back as
+  Server-Sent Events, exactly like the Hermes streaming request above:
+    response.created -> response.reasoning.delta / response.output_text.delta /
+    response.tool_call.* -> response.completed (or response.failed)
+
+  The OpenCode adapter reads `opencode serve`'s `/global/event` stream and
+  re-emits it as gateway SSE, so there is no extra setup beyond an OpenCode
+  install:
+
+    curl -N localhost:3737/v1/responses \
+      -H 'content-type: application/json' \
+      -d '{"input":"hi","agent":"opencode","stream":true}'
+}

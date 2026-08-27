@@ -4,12 +4,12 @@ Guidance for AI coding agents working in this repo. `CLAUDE.md` imports this fil
 
 ## What this is
 
-The Agent37 Gateway: the Responses-style HTTP API (`/v1`, port 3737) that runs inside each Agent37 instance and drives whichever harness a request targets through the `AgentAdapter` seam: Hermes (via a Python worker), OpenClaw (its WebSocket RPC), Claude Code (the Claude Agent SDK), and Codex (`codex app-server` over stdio). A turn picks its harness with the `agent` field; `GATEWAY_DEFAULT_AGENT` sets the default when `agent` is omitted (a container only runs the backend(s) it was provisioned with, so targeting an unprovisioned harness fails at request time). `README.md` is the API contract (request shapes, SSE events, error codes); keep it exact when the surface changes — it feeds the hosted reference at `www.agent37.com/docs`.
+The Agent37 Gateway: the Responses-style HTTP API (`/v1`, port 3737) that runs inside each Agent37 instance and drives whichever harness a request targets through the `AgentAdapter` seam: Hermes (via a Python worker), OpenClaw (its WebSocket RPC), Claude Code (the Claude Agent SDK), Codex (`codex app-server` over stdio), and OpenCode (a resident `opencode serve` over HTTP). A turn picks its harness with the `agent` field; `GATEWAY_DEFAULT_AGENT` sets the default when `agent` is omitted (a container only runs the backend(s) it was provisioned with, so targeting an unprovisioned harness fails at request time). `README.md` is the API contract (request shapes, SSE events, error codes); keep it exact when the surface changes — it feeds the hosted reference at `www.agent37.com/docs`.
 
 Orientation (Node >= 24, TypeScript ESM):
 
 - `server/routes/` — the `/v1` surface (responses, sessions, models, files)
-- `server/adapters/` — the `AgentAdapter` seam (`types.ts`), the Hermes, OpenClaw, Claude Code, and Codex adapters (Codex: `codex-adapter.ts` + `codex-app-server.ts`, sharing the `idle-child.ts` spawn-with-idle-kill helper), and the JSONL worker protocol (`worker-protocol.ts`)
+- `server/adapters/` — the `AgentAdapter` seam (`types.ts`), the Hermes, OpenClaw, Claude Code, Codex, and OpenCode adapters (Codex: `codex-adapter.ts` + `codex-app-server.ts`; OpenCode: `opencode-adapter.ts` + `opencode-server.ts`; both share the `idle-child.ts` spawn-with-idle-kill helper), and the JSONL worker protocol (`worker-protocol.ts`)
 - `server/workers/hermes_worker.py` — the Python side; imports Hermes directly. `npm run selftest:worker` checks it can reach Hermes without booting the server
 - `server/live-runs.ts` + `server/response-store.ts` — in-memory replayable event buffers for in-flight responses, and in-memory (TTL/count-bounded, lost on restart) response metadata; session metadata is never stored — session lists and transcripts project from the session's harness backend (Hermes' SessionDB, OpenClaw's history, ...)
 - `shared/types.ts` — the public API types; `test/` — the integration suite; `bruno/` — hand-poke collection (see `bruno/README.md`)
@@ -32,7 +32,7 @@ Both must pass. Never open a PR on a red or un-run suite — fix the code (or th
 
 The OpenClaw tests in the suite auto-skip when no local OpenClaw gateway is running. If your change touches the OpenClaw adapter or routing, start OpenClaw locally (`openclaw start`, port 18789) so those tests actually run. The adapter speaks OpenClaw's WebSocket gateway RPC and needs one thing from `~/.openclaw/openclaw.json`: its `gateway.auth.token` copied into `OPENCLAW_TOKEN` in your `.env`. See "Set up OpenClaw" in `README.md`.
 
-The Claude Code and Codex tests are NOT optional: a missing or logged-out CLI fails the suite (both ship in release images, so a green run must include them). Install the CLIs and log in (`claude auth login`; `codex login`, or `codex login --with-api-key`); the tests run on those logins and cost real usage.
+The Claude Code, Codex, and OpenCode tests are NOT optional: a missing CLI fails the suite (all three ship in release images, so a green run must include them). Install the CLIs and log in where needed (`claude auth login`; `codex login`, or `codex login --with-api-key`; OpenCode runs on a free or managed model, no login); the Claude Code and Codex tests run on those logins and cost real usage.
 
 ## Releases
 
