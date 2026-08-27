@@ -1,0 +1,34 @@
+meta {
+  name: 09 List Sessions (opencode)
+  type: http
+  seq: 39
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions?agent=opencode
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: opencode
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("opencode sessions", function () {
+    expect(res.body.agent).to.equal("opencode");
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The OpenCode chat sessions on this instance, selected with
+  `?agent=opencode`, projected from OpenCode's own session store as
+  `{ agent, data }`. Omitting `?agent=` falls back to the instance's default
+  harness: not a merged listing. Unknown agent values return a
+  400 validation_error.
+}

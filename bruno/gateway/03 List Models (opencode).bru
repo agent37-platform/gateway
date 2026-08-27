@@ -1,0 +1,38 @@
+meta {
+  name: 03 List Models (opencode)
+  type: http
+  seq: 35
+}
+
+get {
+  url: {{baseUrl}}/v1/models?agent=opencode
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: opencode
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("is an OpenCode model list", function () {
+    expect(res.body.object).to.equal("list");
+    expect(res.body.agent).to.equal("opencode");
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The models the OpenCode harness can run, selected with
+  `?agent=opencode`. Omit the filter (see "03 List Models") for the gateway's
+  configured default. This is OpenCode's provider catalog: each model id is in
+  `provider/model` form and `owned_by` its provider (the managed `agent37`
+  provider is always present; BYO providers appear once their key is in the
+  instance environment). Needs OpenCode installed on this machine
+  (`opencode` on PATH, or OPENCODE_BIN): otherwise the gateway returns
+  503 agent_unavailable.
+}

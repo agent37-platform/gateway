@@ -1,0 +1,30 @@
+meta {
+  name: 10 Get Session (opencode history)
+  type: http
+  seq: 40
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions/{{opencodeSessionId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("includes transcript history", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("opencodeSessionId"));
+    expect(res.body.agent).to.equal("opencode");
+    expect(res.body.history).to.be.an("array");
+  });
+}
+
+docs {
+  The OpenCode session plus its transcript. Reuses `opencodeSessionId`
+  saved by "04 Create Response (opencode)". History is projected on demand
+  from OpenCode's own message store: the gateway never duplicates messages.
+  An unknown or deleted id projects to an empty array.
+}

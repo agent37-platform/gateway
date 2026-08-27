@@ -7,6 +7,7 @@ import { REASONING_EFFORTS } from '../shared/types.js';
 import { effortOptions } from '../server/adapters/claude-code-adapter.js';
 import { THINKING_MAP } from '../server/adapters/openclaw-adapter.js';
 import { codexEffort } from '../server/adapters/codex-adapter.js';
+import { opencodeVariant } from '../server/adapters/opencode-adapter.js';
 
 test('the public enum runs none through ultra', () => {
   assert.deepEqual([...REASONING_EFFORTS], ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
@@ -39,6 +40,24 @@ test('codex: none/minimal floor to low, the rest map by name, ultra stays ultra'
   // Every public effort resolves to a Codex value (the turn/start effort is a
   // free-form string, but a mapping must exist for each level).
   for (const effort of REASONING_EFFORTS) assert.ok(codexEffort(effort), `${effort} unmapped`);
+});
+
+test('opencode: none omits the variant, max/ultra map to max, the rest map by name', () => {
+  assert.equal(opencodeVariant(null), undefined);
+  assert.equal(opencodeVariant(undefined), undefined);
+  assert.equal(opencodeVariant('none'), undefined);
+  assert.equal(opencodeVariant('minimal'), 'minimal');
+  assert.equal(opencodeVariant('low'), 'low');
+  assert.equal(opencodeVariant('medium'), 'medium');
+  assert.equal(opencodeVariant('high'), 'high');
+  assert.equal(opencodeVariant('xhigh'), 'xhigh');
+  assert.equal(opencodeVariant('max'), 'max');
+  assert.equal(opencodeVariant('ultra'), 'max');
+  // Every reasoning level except `none` yields a variant (none is "omit").
+  for (const effort of REASONING_EFFORTS) {
+    if (effort === 'none') continue;
+    assert.ok(opencodeVariant(effort), `${effort} unmapped`);
+  }
 });
 
 test('openclaw: every effort has a thinking level', () => {

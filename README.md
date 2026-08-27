@@ -8,8 +8,8 @@ work back, and keeps the conversation going. The streaming contract and request
 shape are the same whatever agent is behind it — so client code doesn't change
 when the agent does.
 
-Today it routes to **Hermes** (the default), **OpenClaw**, **Claude Code**, and
-**Codex**: pick per request with the `agent` field.
+Today it routes to **Hermes** (the default), **OpenClaw**, **Claude Code**,
+**Codex**, and **OpenCode**: pick per request with the `agent` field.
 
 > Want the hosted API? Use [Agent37 Cloud](https://www.agent37.com/cloud). This
 > repo is the gateway service that powers an Agent37 agent.
@@ -179,6 +179,54 @@ environment does **not** authenticate Codex's app-server on its own — write it
 to `~/.codex/auth.json` with `codex login --with-api-key` (the Agent37 image's
 boot script does this from `OPENAI_API_KEY` automatically).
 
+## How it talks to OpenCode
+
+The OpenCode adapter drives the [OpenCode CLI](https://opencode.ai) through a
+resident `opencode serve` (its local HTTP API plus one Server-Sent-Events
+stream): the server is spawned on demand, kept warm so back-to-back turns reuse
+it, and killed after `OPENCODE_IDLE_MS` idle (10 minutes by default) so a casual
+user costs zero RAM. Tools run with permissions set to `allow` (the instance is
+the customer's own box, as with the other harnesses). Text and reasoning deltas,
+tool calls and their results stream back as the same SSE events, and cancel is
+real (`POST /session/{id}/abort`).
+
+A gateway session id **is** an OpenCode session id: the harness store owns the
+id, so the gateway resolves it before a turn begins. A turn with no `session_id`
+creates an OpenCode session and returns its id; a turn with one continues that
+session (an id OpenCode doesn't know is a `400 validation_error`). Sessions,
+history, rename, and delete all go through OpenCode's own store; the gateway
+keeps no index. `GET /v1/sessions?agent=opencode` lists that store (including
+sessions started from a terminal), `GET /v1/sessions/{id}` projects the
+transcript, `PATCH /v1/sessions/{id}` (rename) writes OpenCode's session title,
+and `DELETE /v1/sessions/{id}` removes the session.
+
+OpenCode answers on the managed Agent37 model out of the box (configured on the
+Agent37 image), so `GET /v1/health?agent=opencode` is `healthy: true` with no
+login step. Bring your own provider by setting its key in the instance
+environment (for example `OPENAI_API_KEY` or `OPENROUTER_API_KEY`): the provider
+then appears in the model list and a turn can target it.
+
+`GET /v1/models?agent=opencode` lists OpenCode's provider catalog (each model
+`owned_by` its provider, id in `provider/model` form); a turn's `model` picks
+one and `reasoning_effort` maps onto OpenCode's `variant` (`none` omits it,
+`low`…`xhigh` by name, `max` and `ultra` to `max`), clamped to the target
+model's advertised set. `usage` reports OpenCode's per-turn tokens and cost
+(`cost_usd` is `0` on free or unpriced models) and `context` its window
+occupancy.
+
+### Set up OpenCode
+
+Install OpenCode on the machine the gateway runs on:
+
+```bash
+curl -fsSL https://opencode.ai/install | bash
+```
+
+Then route any turn to it with `"agent": "opencode"`. The adapter runs the
+`opencode` on `PATH`; set `OPENCODE_BIN` to pin a specific binary. Providers and
+the default model come from OpenCode's own config (`~/.config/opencode`); the
+Agent37 image writes the managed `agent37` provider there.
+
 ## Quickstart
 
 **Prerequisites:**
@@ -229,7 +277,7 @@ behind the host, which handles and forwards authentication.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `input` | string, required | The message or task. |
-| `agent` | string | `hermes`, `openclaw`, `claude-code`, or `codex`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
+| `agent` | string | `hermes`, `openclaw`, `claude-code`, `codex`, or `opencode`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
 | `session_id` | string | Continue a conversation. Omit to start a new one. |
 | `files` | string[] | Absolute paths of files to attach (write them first with `PUT /v1/files/content`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
@@ -284,9 +332,9 @@ running response as `active_response_id`.
 
 | Action | Endpoint |
 | --- | --- |
-| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw\|claude-code\|codex`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
+| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw\|claude-code\|codex\|opencode`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
 | Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history, context }` (`?agent=` to pick the harness; `context` is the session's last reported context window, null until a turn reports one) |
-| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label; Claude Code stores it as its custom session title; Codex stores it as the thread name). A harness without an editable title answers `405 rename_unsupported`. |
+| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label; Claude Code stores it as its custom session title; Codex stores it as the thread name; OpenCode stores it as the session title). A harness without an editable title answers `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |
 
 `active_response_id` is the id of the `in_progress` response on the session, or
@@ -436,7 +484,10 @@ Every error returns a stable, machine-readable body. Branch on `code`, show
 Agent/worker failures surface their own `code` and `hint` where available (e.g.
 `auth_error`, `quota_exhausted`, `model_error`). One response runs at a time per
 session; sending a new turn while one is in flight returns `409 session_busy`,
-with the running response's id in `error.response_id`.
+with the running response's id in `error.response_id`. On `codex` and
+`opencode`, which resolve the session before the turn starts, a turn that can't
+reach the harness (its binary isn't on the instance) is a real `503
+agent_unavailable`, not a `200` failed body.
 
 ## Testing
 
@@ -448,9 +499,10 @@ npm test          # integration suite against the real local Hermes worker/LLM
 state dir. Response tests call the local Hermes worker and configured LLM; the
 suite also covers replay, `session_busy`, cancel, history, and
 error bodies. The OpenClaw tests run against a local OpenClaw gateway and are
-skipped automatically when none is running; the Claude Code and Codex tests run the
-Claude Code and Codex CLIs installed on this machine, on their own logins, and
-fail the suite when either isn't installed or logged in.
+skipped automatically when none is running; the Claude Code, Codex, and OpenCode
+tests run the Claude Code, Codex, and OpenCode CLIs installed on this machine
+(Claude Code and Codex on their own logins, OpenCode on a free or managed model)
+and fail the suite when one isn't installed.
 
 ### Poke it by hand (Bruno)
 
@@ -460,8 +512,9 @@ open that folder in Bruno, pick the **local** environment (`baseUrl`
 saves the `session_id` and response id into the environment, so *Continue
 Session*, *Cancel*, and *Delete Session* just work. The
 *(openclaw)* requests do the same for OpenClaw (start `openclaw` locally first),
-the *(claude-code)* requests for Claude Code, and the *(codex)* requests for
-Codex (each installed and logged in).
+the *(claude-code)* requests for Claude Code, the *(codex)* requests for Codex,
+and the *(opencode)* requests for OpenCode (each installed, and logged in where
+it needs credentials).
 *Upload File* writes a file via `PUT /v1/files/content` and saves its path for
 *Download File*.
 
@@ -471,8 +524,9 @@ All optional — see [`.env.example`](.env.example). Highlights: `PORT` (3737),
 `HOST` (0.0.0.0), `GATEWAY_DEFAULT_AGENT` (the harness a turn routes to when the
 request omits `agent`; `hermes` by default), `AGENT37_GATEWAY_HOME`
 (`~/.agent37-gateway`), the `HERMES_*` variables that locate the Hermes install,
-`OPENCLAW_BASE_URL` / `OPENCLAW_TOKEN` for the OpenClaw route, `CLAUDE_CODE_BIN` for the Claude Code route, and `CODEX_BIN` / `CODEX_HOME`
-(and `CODEX_IDLE_MS`) for the Codex route.
+`OPENCLAW_BASE_URL` / `OPENCLAW_TOKEN` for the OpenClaw route, `CLAUDE_CODE_BIN` for the Claude Code route, `CODEX_BIN` / `CODEX_HOME`
+(and `CODEX_IDLE_MS`) for the Codex route, and `OPENCODE_BIN` (and
+`OPENCODE_IDLE_MS`) for the OpenCode route.
 
 ## Roadmap
 

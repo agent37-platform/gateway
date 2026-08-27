@@ -1,0 +1,35 @@
+meta {
+  name: 01 Health (opencode)
+  type: http
+  seq: 34
+}
+
+get {
+  url: {{baseUrl}}/v1/health?agent=opencode
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: opencode
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("reports OpenCode health", function () {
+    expect(res.body.ok).to.equal(true);
+    expect(res.body.agent).to.equal("opencode");
+    expect(res.body.healthy).to.be.a("boolean");
+  });
+}
+
+docs {
+  Liveness + whether the OpenCode harness backend is ready, selected
+  with `?agent=opencode`. The gateway drives a resident `opencode serve`.
+  `healthy` is true as soon as OpenCode is installed (`opencode` on PATH,
+  or OPENCODE_BIN): it answers on the managed Agent37 model out of the box,
+  so there is no login step.
+}
