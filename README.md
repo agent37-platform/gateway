@@ -8,8 +8,8 @@ work back, and keeps the conversation going. The streaming contract and request
 shape are the same whatever agent is behind it — so client code doesn't change
 when the agent does.
 
-Today it routes to **Hermes** (the default), **OpenClaw**, and **Claude Code**:
-pick per request with the `agent` field.
+Today it routes to **Hermes** (the default), **OpenClaw**, **Claude Code**, and
+**Codex**: pick per request with the `agent` field.
 
 > Want the hosted API? Use [Agent37 Cloud](https://www.agent37.com/cloud). This
 > repo is the gateway service that powers an Agent37 agent.
@@ -130,6 +130,55 @@ Then route any turn to it with `"agent": "claude-code"`. The adapter runs the
 `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (what `claude setup-token`
 prints) in the gateway's environment works instead of the interactive login.
 
+## How it talks to Codex
+
+The Codex adapter drives the [Codex CLI](https://developers.openai.com/codex)
+through `codex app-server` (newline-delimited JSON-RPC over stdio): one process
+spawned on demand that lingers a few seconds so a UI burst (list + read + turn)
+reuses it, then falls to zero idle RAM. Tools run with `approvalPolicy: "never"`
+and `sandbox: "danger-full-access"` (the instance is the customer's own box, as
+with the other harnesses). Text and reasoning deltas, tool calls and their
+results stream back as the same SSE events, and cancel is real
+(`turn/interrupt`).
+
+A gateway session id **is** a Codex thread id: the harness store owns the id, so
+the gateway resolves it before a turn begins — a turn with no `session_id`
+creates a Codex thread and returns its id; a turn with one resumes that thread
+(an id Codex doesn't know is a `400 validation_error`). Threads, history,
+rename, and delete all go through Codex's own store
+(`~/.codex/sessions/**/rollout-*.jsonl`); the gateway keeps no index.
+`GET /v1/sessions?agent=codex` lists that store (including threads started from
+a terminal in the workspace), `GET /v1/sessions/{id}` projects the transcript,
+`PATCH /v1/sessions/{id}` (rename) writes Codex's thread name, and
+`DELETE /v1/sessions/{id}` removes the thread.
+
+The gateway passes no credential: Codex runs on its own login. Until an account
+is configured, a turn fails with `auth_error` (and a hint to log in) and
+`GET /v1/health?agent=codex` reports `healthy: false`.
+
+`GET /v1/models?agent=codex` lists Codex's live model catalog (`owned_by:
+"openai"`); a turn's `model` is passed through and `reasoning_effort` maps onto
+Codex's efforts (`none`/`minimal` → `low`, `low`…`xhigh` by name, `max`, and
+`ultra` → Codex's multi-agent mode), clamped to the target model's advertised
+set. `usage` reports Codex's per-turn tokens (`cost_usd` is `null` — Codex
+bills its own account, not the gateway) and `context` its window occupancy.
+
+### Set up Codex
+
+Install Codex on the machine the gateway runs on and log in:
+
+```bash
+npm install -g @openai/codex
+codex login            # ChatGPT sign-in, or: codex login --with-api-key
+```
+
+Then route any turn to it with `"agent": "codex"`. The adapter runs the `codex`
+on `PATH`; set `CODEX_BIN` to pin a specific binary and `CODEX_HOME` to point at
+a specific config/credentials directory. A bare `OPENAI_API_KEY` in the
+environment does **not** authenticate Codex's app-server on its own — write it
+to `~/.codex/auth.json` with `codex login --with-api-key` (the Agent37 image's
+boot script does this from `OPENAI_API_KEY` automatically).
+
 ## Quickstart
 
 **Prerequisites:**
@@ -180,7 +229,7 @@ behind the host, which handles and forwards authentication.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `input` | string, required | The message or task. |
-| `agent` | string | `hermes`, `openclaw`, or `claude-code`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
+| `agent` | string | `hermes`, `openclaw`, `claude-code`, or `codex`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
 | `session_id` | string | Continue a conversation. Omit to start a new one. |
 | `files` | string[] | Absolute paths of files to attach (write them first with `PUT /v1/files/content`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
@@ -235,9 +284,9 @@ running response as `active_response_id`.
 
 | Action | Endpoint |
 | --- | --- |
-| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw\|claude-code`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
+| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw\|claude-code\|codex`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
 | Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history, context }` (`?agent=` to pick the harness; `context` is the session's last reported context window, null until a turn reports one) |
-| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label; Claude Code stores it as its custom session title). A harness without an editable title answers `405 rename_unsupported`. |
+| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label; Claude Code stores it as its custom session title; Codex stores it as the thread name). A harness without an editable title answers `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |
 
 `active_response_id` is the id of the `in_progress` response on the session, or
@@ -321,14 +370,14 @@ and stored paths assume the instance's home directory stays stable.
 
 | Action | Endpoint |
 | --- | --- |
-| Models a harness can run | `GET /v1/models` (configured default; add `?agent=hermes\|openclaw\|claude-code` to target one) |
-| Liveness + harness reachability | `GET /v1/health` (configured default; add `?agent=hermes\|openclaw\|claude-code` to target one) |
+| Models a harness can run | `GET /v1/models` (configured default; add `?agent=hermes\|openclaw\|claude-code\|codex` to target one) |
+| Liveness + harness reachability | `GET /v1/health` (configured default; add `?agent=hermes\|openclaw\|claude-code\|codex` to target one) |
 | Version | `GET /v1/version` |
 
 `GET /v1/health` reports on the gateway's configured default harness, or the
 one named by an optional `?agent=` query param. It returns `{ ok, agent,
-healthy }`, plus a legacy `hermes` field when Hermes is probed. For Claude Code,
-`healthy` also means it is logged in.
+healthy }`, plus a legacy `hermes` field when Hermes is probed. For Claude Code and
+Codex, `healthy` also means an account is configured.
 
 `GET /v1/models` returns the OpenAI list shape, so any OpenAI-compatible client
 works. It lists the models of one harness — the configured default, or the one
@@ -399,9 +448,9 @@ npm test          # integration suite against the real local Hermes worker/LLM
 state dir. Response tests call the local Hermes worker and configured LLM; the
 suite also covers replay, `session_busy`, cancel, history, and
 error bodies. The OpenClaw tests run against a local OpenClaw gateway and are
-skipped automatically when none is running; the Claude Code tests run the
-Claude Code CLI installed on this machine, on its own login, and are skipped
-when it isn't installed or logged in.
+skipped automatically when none is running; the Claude Code and Codex tests run the
+Claude Code and Codex CLIs installed on this machine, on their own logins, and
+fail the suite when either isn't installed or logged in.
 
 ### Poke it by hand (Bruno)
 
@@ -411,7 +460,8 @@ open that folder in Bruno, pick the **local** environment (`baseUrl`
 saves the `session_id` and response id into the environment, so *Continue
 Session*, *Cancel*, and *Delete Session* just work. The
 *(openclaw)* requests do the same for OpenClaw (start `openclaw` locally first),
-and the *(claude-code)* requests for Claude Code (installed and logged in).
+the *(claude-code)* requests for Claude Code, and the *(codex)* requests for
+Codex (each installed and logged in).
 *Upload File* writes a file via `PUT /v1/files/content` and saves its path for
 *Download File*.
 
@@ -421,8 +471,8 @@ All optional — see [`.env.example`](.env.example). Highlights: `PORT` (3737),
 `HOST` (0.0.0.0), `GATEWAY_DEFAULT_AGENT` (the harness a turn routes to when the
 request omits `agent`; `hermes` by default), `AGENT37_GATEWAY_HOME`
 (`~/.agent37-gateway`), the `HERMES_*` variables that locate the Hermes install,
-`OPENCLAW_BASE_URL` / `OPENCLAW_TOKEN` for the OpenClaw route, and
-`CLAUDE_CODE_BIN` for the Claude Code route.
+`OPENCLAW_BASE_URL` / `OPENCLAW_TOKEN` for the OpenClaw route, `CLAUDE_CODE_BIN` for the Claude Code route, and `CODEX_BIN` / `CODEX_HOME`
+(and `CODEX_IDLE_MS`) for the Codex route.
 
 ## Roadmap
 

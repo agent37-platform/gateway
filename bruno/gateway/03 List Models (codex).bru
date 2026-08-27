@@ -1,0 +1,36 @@
+meta {
+  name: 03 List Models (codex)
+  type: http
+  seq: 26
+}
+
+get {
+  url: {{baseUrl}}/v1/models?agent=codex
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: codex
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("is a Codex model list", function () {
+    expect(res.body.object).to.equal("list");
+    expect(res.body.agent).to.equal("codex");
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The models the Codex harness can run, selected with
+  `?agent=codex` (`hermes` | `openclaw` | `claude-code` | `codex`). Omit the
+  filter (see "03 List Models") for the gateway's configured default. This is Codex's live model catalog (owned_by: openai);
+  when logged out it is still listed. Needs Codex installed on this machine
+  (`codex` on PATH, or CODEX_BIN): otherwise the gateway returns
+  503 agent_unavailable.
+}

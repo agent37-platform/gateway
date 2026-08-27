@@ -5,8 +5,8 @@ import {
   RESPONSE_MODES,
   SUPPORTED_AGENTS,
 } from '../../shared/types.js';
-import { isRecord, optionalEnum, responseNotFound, validationError } from '../errors.js';
-import { INSTANCE_DEFAULT_AGENT } from '../agent.js';
+import { GatewayError, gatewayErrorFromWorker, isRecord, optionalEnum, responseNotFound, validationError } from '../errors.js';
+import { getAdapter, INSTANCE_DEFAULT_AGENT } from '../agent.js';
 import { resolveHomeAwarePath } from '../paths.js';
 import { initSSE, writeStreamEvent } from '../sse.js';
 import { attach, hasRun } from '../live-runs.js';
@@ -127,13 +127,25 @@ responsesRouter.post('/', async (req, res, next) => {
   let begun;
   let request: ResponseRequest;
   let stream: boolean;
+  let agent: string | undefined;
   try {
     const parsed = parseResponseBody(req.body);
     request = parsed.request;
     stream = parsed.stream;
+    agent = request.agent;
+    // Harnesses whose store owns the id (Codex, OpenCode) resolve it here,
+    // before the response begins: create-on-first-turn, or verify an existing
+    // one. A missing binary throws ENOENT → 503 agent_unavailable (headers are
+    // not sent yet); a bad client-supplied id throws validationError → 400.
+    const adapter = getAdapter(request.agent);
+    if (adapter.resolveSession) {
+      request.sessionId = await adapter.resolveSession(request.sessionId);
+    }
     begun = beginResponse(request);
   } catch (error) {
-    return next(error);
+    return next(
+      error instanceof GatewayError ? error : gatewayErrorFromWorker(error, 'Could not create session', agent),
+    );
   }
 
   if (stream) {

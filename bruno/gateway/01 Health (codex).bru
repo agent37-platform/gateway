@@ -1,0 +1,36 @@
+meta {
+  name: 01 Health (codex)
+  type: http
+  seq: 25
+}
+
+get {
+  url: {{baseUrl}}/v1/health?agent=codex
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: codex
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("reports Codex health", function () {
+    expect(res.body.ok).to.equal(true);
+    expect(res.body.agent).to.equal("codex");
+    expect(res.body.healthy).to.be.a("boolean");
+  });
+}
+
+docs {
+  Liveness + whether the Codex harness backend is reachable, selected
+  with `?agent=codex`. The gateway runs the Codex CLI through the
+  `codex app-server` on Codex's own login. `healthy` is false until this
+  machine has Codex installed (`codex` on PATH, or CODEX_BIN) and
+  logged in (`codex login`, or OPENAI_API_KEY (via `codex login --with-api-key`)
+  in the gateway's environment).
+}
