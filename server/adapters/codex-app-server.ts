@@ -301,12 +301,17 @@ export class CodexClient {
     onTurnId: (turnId: string) => void,
   ): AsyncIterable<Notification> {
     const queue = new AsyncQueue<Notification>();
+    let turnId: string | undefined;
     // Watchdog: a turn that goes silent (no notification) for too long is
-    // treated as stalled and the stream is ended, releasing the session lock.
+    // treated as stalled — interrupt the backend turn (so its tools/file edits
+    // stop) and end the stream, releasing the session lock.
     let idleTimer: NodeJS.Timeout | undefined;
     const resetIdle = (): void => {
       clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => queue.end(), TURN_IDLE_MS);
+      idleTimer = setTimeout(() => {
+        if (turnId) void this.interruptTurn(threadId, turnId).catch(() => {});
+        queue.end();
+      }, TURN_IDLE_MS);
       idleTimer.unref();
     };
     const unsubscribe = this.onNotification((n) => {
@@ -329,7 +334,7 @@ export class CodexClient {
         ...(opts.effort ? { effort: opts.effort } : {}),
         ...(opts.model ? { model: opts.model } : {}),
       });
-      const turnId = res.turn.id;
+      turnId = res.turn.id;
       onTurnId(turnId);
       for await (const n of queue) {
         // Only this turn's notifications (a shared thread can interleave).

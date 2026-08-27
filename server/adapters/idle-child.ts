@@ -13,6 +13,10 @@
 // between spawns (the integration tests flip CODEX_HOME / *_BIN) is honoured
 // without any explicit snapshot bookkeeping.
 
+// Signals that a spawn resolved after a stop() invalidated it, so acquire()
+// should discard it and start a fresh child rather than hand back a dead one.
+const INVALIDATED = Symbol('idle-child-invalidated');
+
 export interface StartedChild<T> {
   /** The protocol client the adapter talks to. */
   value: T;
@@ -24,7 +28,7 @@ export interface StartedChild<T> {
 
 export class IdleChild<T> {
   private current: StartedChild<T> | null = null;
-  private starting: Promise<T> | null = null;
+  private starting: Promise<T | typeof INVALIDATED> | null = null;
   private inflight = 0;
   private idleTimer: NodeJS.Timeout | null = null;
   // Bumped on every stop(); a spawn in flight when stop() ran checks this and
@@ -42,29 +46,34 @@ export class IdleChild<T> {
     this.clearIdle();
     this.inflight++;
     try {
-      if (this.current) return this.current.value;
-      if (!this.starting) {
-        const startGeneration = this.generation;
-        this.starting = this.opts
-          .start()
-          .then((started) => {
-            // A stop() landed while we were spawning: don't publish a child the
-            // teardown already reported killing — kill it here instead.
-            if (startGeneration !== this.generation) {
-              started.kill();
-              throw new Error('idle child start aborted by stop()');
-            }
-            this.current = started;
-            started.exited.then(() => {
-              if (this.current === started) this.current = null;
+      for (;;) {
+        if (this.current) return this.current.value;
+        if (!this.starting) {
+          const startGeneration = this.generation;
+          this.starting = this.opts
+            .start()
+            .then((started) => {
+              // A stop() landed while we were spawning: don't publish a child
+              // the teardown already reported killing. Kill it and signal
+              // INVALIDATED so a waiter starts a fresh one instead of failing.
+              if (startGeneration !== this.generation) {
+                started.kill();
+                return INVALIDATED;
+              }
+              this.current = started;
+              started.exited.then(() => {
+                if (this.current === started) this.current = null;
+              });
+              return started.value;
+            })
+            .finally(() => {
+              this.starting = null;
             });
-            return started.value;
-          })
-          .finally(() => {
-            this.starting = null;
-          });
+        }
+        const result = await this.starting;
+        if (result !== INVALIDATED) return result;
+        // Invalidated by a stop() during startup — loop and spawn a fresh child.
       }
-      return await this.starting;
     } catch (error) {
       this.inflight--;
       throw error;
