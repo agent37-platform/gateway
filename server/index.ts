@@ -6,6 +6,7 @@ import { adapter, getAdapter } from './agent.js';
 import { shutdownLiveRuns } from './live-runs.js';
 import { shutdownResponseStore } from './response-store.js';
 import { ensureGatewayStateDirs } from './paths.js';
+import { SUPPORTED_AGENTS } from '../shared/types.js';
 
 ensureGatewayStateDirs();
 
@@ -93,9 +94,7 @@ async function shutdown(reason: ShutdownReason, exitCode = 0): Promise<void> {
   shutdownResponseStore();
   const results = await Promise.allSettled([
     closeHttpServer(),
-    adapter.stop?.() ?? Promise.resolve(),
-    getAdapter('openclaw').stop?.() ?? Promise.resolve(),
-    getAdapter('claude-code').stop?.() ?? Promise.resolve(),
+    ...SUPPORTED_AGENTS.map((name) => getAdapter(name).stop?.() ?? Promise.resolve()),
   ]);
   for (const result of results) {
     if (result.status === 'rejected') console.error(result.reason);

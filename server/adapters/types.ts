@@ -57,6 +57,16 @@ export interface StreamEvent {
  * the backend(s) it was provisioned with.)
  */
 export interface AgentAdapter {
+  /** Resolve the session id a turn will run on, BEFORE the response begins.
+   *  Harnesses whose own store mints the id (Codex threads, OpenCode sessions)
+   *  implement this: with no id it creates a session and returns the native id;
+   *  with an id it verifies the session exists and returns it, or throws
+   *  `validationError(..., 'session_id')`. The responses route awaits it before
+   *  `beginResponse()` (the id rides in `response.created`, and a stream event
+   *  cannot change the HTTP status). Harnesses that accept any key omit it, and
+   *  the gateway keeps minting ids for them. */
+  resolveSession?(sessionId?: string): Promise<string>;
+
   /** Stream a single turn. The async iterable ends after a `done` or `error`. */
   chatStream(
     sessionId: string,

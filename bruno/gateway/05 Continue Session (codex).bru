@@ -1,0 +1,42 @@
+meta {
+  name: 05 Continue Session (codex)
+  type: http
+  seq: 28
+}
+
+post {
+  url: {{baseUrl}}/v1/responses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "session_id": "{{codexSessionId}}",
+    "input": "In one short sentence, what did I just ask you to say?",
+    "agent": "codex",
+    "reasoning_effort": "low"
+  }
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("same session, completed", function () {
+    expect(res.body.session_id).to.equal(bru.getEnvVar("codexSessionId"));
+    expect(res.body.status).to.equal("completed");
+    expect(res.body.agent).to.equal("codex");
+  });
+}
+
+docs {
+  Continue a Codex conversation. Reuses `codexSessionId` saved by
+  "04 Create Response (codex)". Always include `"agent": "codex"`
+  so the gateway routes the turn to the right backend.
+}

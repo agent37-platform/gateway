@@ -13,6 +13,7 @@ let base: string;
 before(async () => {
   process.env.OPENCLAW_BASE_URL = 'http://127.0.0.1:59321';
   process.env.CLAUDE_CODE_BIN = '/nonexistent/claude';
+  process.env.CODEX_BIN = '/nonexistent/codex';
   server = await startTestServer();
   base = server.base;
 });
@@ -60,5 +61,29 @@ test('a claude-code request without the claude binary fails with agent_unavailab
   assert.equal(body.error?.code, 'agent_unavailable');
 
   const health = (await (await fetch(`${base}/v1/health?agent=claude-code`)).json()) as { healthy: boolean };
+  assert.equal(health.healthy, false);
+});
+
+test('a codex request without the codex binary fails with agent_unavailable', async () => {
+  const models = await fetch(`${base}/v1/models?agent=codex`);
+  assert.equal(models.status, 503);
+  const modelsBody = (await models.json()) as { error: { code: string; message: string } };
+  assert.equal(modelsBody.error.code, 'agent_unavailable');
+  assert.match(modelsBody.error.message, /codex/);
+
+  // Codex resolves its session before the response begins, so a missing binary
+  // is caught while headers are still open: the turn is a real 503, not a
+  // 200 failed body (unlike Hermes/OpenClaw/Claude Code, which have no
+  // resolveSession and settle mid-stream).
+  const turn = await fetch(`${base}/v1/responses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent: 'codex', input: 'hello' }),
+  });
+  assert.equal(turn.status, 503);
+  const turnBody = (await turn.json()) as { error: { code: string } };
+  assert.equal(turnBody.error.code, 'agent_unavailable');
+
+  const health = (await (await fetch(`${base}/v1/health?agent=codex`)).json()) as { healthy: boolean };
   assert.equal(health.healthy, false);
 });

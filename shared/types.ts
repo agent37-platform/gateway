@@ -12,14 +12,14 @@
 
 /** `max` is the top plain thinking level; `ultra` is the harness's own Ultra
  *  mode — top thinking plus agentic orchestration (Hermes `ultra`, OpenClaw
- *  `ultra`, Claude Code ultracode). */
+ *  `ultra`, Claude Code ultracode, Codex's multi-agent mode). */
 export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
 /** Response modes. `chat` runs one turn; `goal` is reserved for a fast-follow. */
 export const RESPONSE_MODES = ['chat', 'goal'] as const;
 
-export const SUPPORTED_AGENTS = ['hermes', 'openclaw', 'claude-code'] as const;
+export const SUPPORTED_AGENTS = ['hermes', 'openclaw', 'claude-code', 'codex'] as const;
 export type AgentType = (typeof SUPPORTED_AGENTS)[number];
 export const DEFAULT_AGENT: AgentType = 'hermes';
 

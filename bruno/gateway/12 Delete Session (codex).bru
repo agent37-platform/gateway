@@ -1,0 +1,30 @@
+meta {
+  name: 12 Delete Session (codex)
+  type: http
+  seq: 32
+}
+
+delete {
+  url: {{baseUrl}}/v1/sessions/{{codexSessionId}}?agent=codex
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: codex
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("deleted", function () {
+    expect(res.body.deleted).to.equal(true);
+  });
+}
+
+docs {
+  Permanently remove the Codex session's transcript from Codex's
+  own store. Other sessions on the instance are untouched.
+}

@@ -1,0 +1,34 @@
+meta {
+  name: 10 Get Session (codex history)
+  type: http
+  seq: 31
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions/{{codexSessionId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("includes transcript history", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("codexSessionId"));
+    expect(res.body.agent).to.equal("codex");
+    expect(res.body.history).to.be.an("array");
+  });
+}
+
+docs {
+  The Codex session plus its transcript. Reuses `codexSessionId`
+  saved by "04 Create Response (codex)". History is projected on demand
+  from Codex's own transcript file
+  (`~/.codex/sessions/**/rollout-*.jsonl`): the gateway never duplicates
+  messages.
+
+  Codex must have written that transcript for history to be non-empty;
+  otherwise `history` comes back as an empty array.
+}

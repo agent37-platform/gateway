@@ -7,5 +7,6 @@ test('GATEWAY_DEFAULT_AGENT resolution: unset falls back, known passes, garbage 
   assert.equal(resolveConfiguredDefaultAgent('  '), DEFAULT_AGENT);
   assert.equal(resolveConfiguredDefaultAgent('openclaw'), 'openclaw');
   assert.equal(resolveConfiguredDefaultAgent('claude-code'), 'claude-code');
-  assert.throws(() => resolveConfiguredDefaultAgent('opencalw'), /must be one of: hermes, openclaw, claude-code/);
+  assert.equal(resolveConfiguredDefaultAgent('codex'), 'codex');
+  assert.throws(() => resolveConfiguredDefaultAgent('opencalw'), /must be one of: hermes, openclaw, claude-code, codex/);
 });

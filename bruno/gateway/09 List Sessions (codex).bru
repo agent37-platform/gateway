@@ -1,0 +1,35 @@
+meta {
+  name: 09 List Sessions (codex)
+  type: http
+  seq: 30
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions?agent=codex
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: codex
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("codex sessions", function () {
+    expect(res.body.agent).to.equal("codex");
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The Codex chat sessions on this instance, selected with
+  `?agent=codex` (`hermes` | `openclaw` | `codex`), projected from
+  Codex's own thread store (`~/.codex/sessions/...`) as
+  `{ agent, data }`. Omitting `?agent=` falls back to the instance's default
+  harness: not a merged listing. Unknown agent values return a
+  400 validation_error.
+}

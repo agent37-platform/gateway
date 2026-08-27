@@ -1,0 +1,47 @@
+meta {
+  name: 15 Rename Session (codex)
+  type: http
+  seq: 33
+}
+
+patch {
+  url: {{baseUrl}}/v1/sessions/{{codexSessionId}}?agent=codex
+  body: json
+  auth: none
+}
+
+params:query {
+  agent: codex
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "title": "Renamed from Bruno"
+  }
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("renamed", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("codexSessionId"));
+    expect(res.body.renamed).to.equal(true);
+  });
+}
+
+docs {
+  Rename a Codex session by writing its title straight into Codex's
+  Code's own store (`PATCH /v1/sessions/:id?agent=codex`, body
+  `{ "title": "…" }` → `{ id, agent, renamed }`). The gateway calls Codex's
+  `thread/name/set`, which sets the
+  transcript that the session list reads back as its title. Supported on both
+  Hermes and Codex; harnesses without an editable title (OpenClaw)
+  return `405 rename_unsupported`. Reuses the `codexSessionId` saved by
+  "04 Create Response (codex)".
+}
