@@ -1,0 +1,32 @@
+meta {
+  name: 12 Delete Session (grok)
+  type: http
+  seq: 50
+}
+
+delete {
+  url: {{baseUrl}}/v1/sessions/{{grokSessionId}}?agent=grok
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: grok
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("deleted", function () {
+    expect(res.body.deleted).to.equal(true);
+  });
+}
+
+docs {
+  Permanently remove the Grok session from grok's own store. Other
+  sessions on the instance are untouched. Grok has no editable session
+  title, so there is no "15 Rename Session (grok)": a rename PATCH
+  answers 405 rename_unsupported.
+}

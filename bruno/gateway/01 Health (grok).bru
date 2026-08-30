@@ -1,0 +1,35 @@
+meta {
+  name: 01 Health (grok)
+  type: http
+  seq: 43
+}
+
+get {
+  url: {{baseUrl}}/v1/health?agent=grok
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: grok
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("reports Grok health", function () {
+    expect(res.body.ok).to.equal(true);
+    expect(res.body.agent).to.equal("grok");
+    expect(res.body.healthy).to.be.a("boolean");
+  });
+}
+
+docs {
+  Liveness + whether the Grok harness backend is reachable, selected
+  with `?agent=grok`. The gateway runs Grok Build headless, one `grok -p`
+  process per turn. `healthy` is false until this machine has Grok
+  installed (`grok` on PATH, or GROK_BIN) and a credential present
+  (XAI_API_KEY in the environment, or `grok login` on the box).
+}

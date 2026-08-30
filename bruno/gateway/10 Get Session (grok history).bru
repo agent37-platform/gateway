@@ -1,0 +1,34 @@
+meta {
+  name: 10 Get Session (grok history)
+  type: http
+  seq: 49
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions/{{grokSessionId}}?agent=grok
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: grok
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("includes transcript history", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("grokSessionId"));
+    expect(res.body.agent).to.equal("grok");
+    expect(res.body.history).to.be.an("array");
+  });
+}
+
+docs {
+  The Grok session plus its transcript. Reuses `grokSessionId` saved by
+  "04 Create Response (grok)". History is projected on demand from
+  grok's own transcript store: the gateway never duplicates messages.
+  An unknown or deleted id projects to an empty array.
+}
