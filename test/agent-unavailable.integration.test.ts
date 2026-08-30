@@ -15,6 +15,7 @@ before(async () => {
   process.env.CLAUDE_CODE_BIN = '/nonexistent/claude';
   process.env.CODEX_BIN = '/nonexistent/codex';
   process.env.OPENCODE_BIN = '/nonexistent/opencode';
+  process.env.GROK_BIN = '/nonexistent/grok';
   server = await startTestServer();
   base = server.base;
 });
@@ -109,5 +110,28 @@ test('an opencode request without the opencode binary fails with agent_unavailab
   assert.equal(turnBody.error.code, 'agent_unavailable');
 
   const health = (await (await fetch(`${base}/v1/health?agent=opencode`)).json()) as { healthy: boolean };
+  assert.equal(health.healthy, false);
+});
+
+test('a grok request without the grok binary fails with agent_unavailable', async () => {
+  const models = await fetch(`${base}/v1/models?agent=grok`);
+  assert.equal(models.status, 503);
+  const modelsBody = (await models.json()) as { error: { code: string; message: string } };
+  assert.equal(modelsBody.error.code, 'agent_unavailable');
+  assert.match(modelsBody.error.message, /grok/);
+
+  // Grok resolves its session before the response begins, so a missing binary
+  // is caught while headers are still open: the turn is a real 503, not a
+  // 200 failed body (like Codex and OpenCode).
+  const turn = await fetch(`${base}/v1/responses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent: 'grok', input: 'hello' }),
+  });
+  assert.equal(turn.status, 503);
+  const turnBody = (await turn.json()) as { error: { code: string } };
+  assert.equal(turnBody.error.code, 'agent_unavailable');
+
+  const health = (await (await fetch(`${base}/v1/health?agent=grok`)).json()) as { healthy: boolean };
   assert.equal(health.healthy, false);
 });

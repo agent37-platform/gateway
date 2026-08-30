@@ -1,0 +1,56 @@
+meta {
+  name: 04 Create Response (grok)
+  type: http
+  seq: 45
+}
+
+post {
+  url: {{baseUrl}}/v1/responses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": "What is the time now in IST?",
+    "agent": "grok",
+    "reasoning_effort": "low"
+  }
+}
+
+script:post-response {
+  if (res.status === 200 && res.body) {
+    if (res.body.session_id) bru.setEnvVar("grokSessionId", res.body.session_id, { persist: true });
+    if (res.body.id) bru.setEnvVar("grokResponseId", res.body.id, { persist: true });
+  }
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("completed with text", function () {
+    expect(res.body.id).to.be.a("string");
+    expect(res.body.session_id).to.be.a("string");
+    expect(res.body.status).to.equal("completed");
+    expect(res.body.agent).to.equal("grok");
+    expect(res.body.output_text).to.be.a("string");
+  });
+}
+
+docs {
+  Start a new Grok session. Pass `"agent": "grok"`: the gateway runs
+  Grok Build headless (`grok -p`), one process per turn on grok's own
+  credentials.
+
+  The reply saves `grokSessionId` and `grokResponseId` to the
+  environment so the follow-up requests below can reuse them.
+
+  Grok must be installed on this machine (`grok` on PATH, or GROK_BIN)
+  with XAI_API_KEY in the environment (or `grok login` run on the box).
+}

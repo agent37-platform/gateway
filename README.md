@@ -9,7 +9,7 @@ shape are the same whatever agent is behind it — so client code doesn't change
 when the agent does.
 
 Today it routes to **Hermes** (the default), **OpenClaw**, **Claude Code**,
-**Codex**, and **OpenCode**: pick per request with the `agent` field.
+**Codex**, **OpenCode**, and **Grok**: pick per request with the `agent` field.
 
 > Want the hosted API? Use [Agent37 Cloud](https://www.agent37.com/cloud). This
 > repo is the gateway service that powers an Agent37 agent.
@@ -227,6 +227,51 @@ Then route any turn to it with `"agent": "opencode"`. The adapter runs the
 the default model come from OpenCode's own config (`~/.config/opencode`); the
 Agent37 image writes the managed `agent37` provider there.
 
+## How it talks to Grok
+
+The Grok adapter drives [Grok Build](https://docs.x.ai/build/overview) (xAI's
+`grok` CLI) headless: one `grok -p` process per turn, streaming NDJSON
+(`--output-format streaming-json`), exiting when the turn ends — no resident
+server, so an idle instance costs zero RAM. Tools run auto-approved
+(`--always-approve`; the instance is the customer's own box, as with the other
+harnesses) with grok's internal sandbox off — the container is the sandbox.
+Text and reasoning deltas, tool calls and their results stream back as the same
+SSE events, and cancel is real (the turn's process is interrupted).
+
+A gateway session id **is** a Grok session id (a UUID in grok's own store,
+`~/.grok/sessions`): the gateway resolves it before a turn begins. A turn with
+no `session_id` mints a UUID and hands it to grok on the session's first turn;
+a turn with one resumes that session (an id grok doesn't know is a
+`400 validation_error`). Sessions, history, and delete all go through grok's
+own store; the gateway keeps no index. `GET /v1/sessions?agent=grok` lists that
+store (including sessions started from a terminal), `GET /v1/sessions/{id}`
+projects the transcript, and `DELETE /v1/sessions/{id}` removes the session.
+Grok stores no editable title, so rename answers `405 rename_unsupported`.
+
+The gateway passes no credential: grok runs on its own auth — `XAI_API_KEY` in
+the instance environment (pay-as-you-go via api.x.ai), or `grok login` on the
+box. Until one is present, a turn fails with the documented `auth_error` and
+`GET /v1/health?agent=grok` reports `healthy: false`.
+
+`GET /v1/models?agent=grok` lists grok's live per-key catalog (`owned_by: xai`);
+unkeyed it is an empty list, never an error. A turn's `model` picks one and
+`reasoning_effort` maps onto grok's `--reasoning-effort` (levels by name,
+`ultra` → `max`; grok ignores the flag on non-reasoning models). `usage`
+reports grok's per-turn tokens and real USD cost.
+
+### Set up Grok
+
+Install Grok Build on the machine the gateway runs on and set a key:
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+export XAI_API_KEY=xai-...   # or: grok login
+```
+
+Then route any turn to it with `"agent": "grok"`. The adapter runs the `grok`
+on `PATH`; set `GROK_BIN` to pin a specific binary and `GROK_HOME` to move its
+config/session store (default `~/.grok`).
+
 ## Quickstart
 
 **Prerequisites:**
@@ -277,7 +322,7 @@ behind the host, which handles and forwards authentication.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `input` | string, required | The message or task. |
-| `agent` | string | `hermes`, `openclaw`, `claude-code`, `codex`, or `opencode`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
+| `agent` | string | `hermes`, `openclaw`, `claude-code`, `codex`, `opencode`, or `grok`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
 | `session_id` | string | Continue a conversation. Omit to start a new one. |
 | `files` | string[] | Absolute paths of files to attach (write them first with `PUT /v1/files/content`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
@@ -332,9 +377,9 @@ running response as `active_response_id`.
 
 | Action | Endpoint |
 | --- | --- |
-| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw\|claude-code\|codex\|opencode`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
+| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw\|claude-code\|codex\|opencode\|grok`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
 | Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history, context }` (`?agent=` to pick the harness; `context` is the session's last reported context window, null until a turn reports one) |
-| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label; Claude Code stores it as its custom session title; Codex stores it as the thread name; OpenCode stores it as the session title). A harness without an editable title answers `405 rename_unsupported`. |
+| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label; Claude Code stores it as its custom session title; Codex stores it as the thread name; OpenCode stores it as the session title). A harness without an editable title (Grok) answers `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |
 
 `active_response_id` is the id of the `in_progress` response on the session, or
@@ -418,8 +463,8 @@ and stored paths assume the instance's home directory stays stable.
 
 | Action | Endpoint |
 | --- | --- |
-| Models a harness can run | `GET /v1/models` (configured default; add `?agent=hermes\|openclaw\|claude-code\|codex` to target one) |
-| Liveness + harness reachability | `GET /v1/health` (configured default; add `?agent=hermes\|openclaw\|claude-code\|codex` to target one) |
+| Models a harness can run | `GET /v1/models` (configured default; add `?agent=hermes\|openclaw\|claude-code\|codex\|opencode\|grok` to target one) |
+| Liveness + harness reachability | `GET /v1/health` (configured default; add `?agent=hermes\|openclaw\|claude-code\|codex\|opencode\|grok` to target one) |
 | Version | `GET /v1/version` |
 
 `GET /v1/health` reports on the gateway's configured default harness, or the
@@ -484,8 +529,8 @@ Every error returns a stable, machine-readable body. Branch on `code`, show
 Agent/worker failures surface their own `code` and `hint` where available (e.g.
 `auth_error`, `quota_exhausted`, `model_error`). One response runs at a time per
 session; sending a new turn while one is in flight returns `409 session_busy`,
-with the running response's id in `error.response_id`. On `codex` and
-`opencode`, which resolve the session before the turn starts, a turn that can't
+with the running response's id in `error.response_id`. On `codex`, `opencode`,
+and `grok`, which resolve the session before the turn starts, a turn that can't
 reach the harness (its binary isn't on the instance) is a real `503
 agent_unavailable`, not a `200` failed body.
 

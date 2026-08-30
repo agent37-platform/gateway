@@ -8,6 +8,7 @@ import { effortOptions } from '../server/adapters/claude-code-adapter.js';
 import { THINKING_MAP } from '../server/adapters/openclaw-adapter.js';
 import { codexEffort } from '../server/adapters/codex-adapter.js';
 import { opencodeVariant } from '../server/adapters/opencode-adapter.js';
+import { grokEffort } from '../server/adapters/grok-adapter.js';
 
 test('the public enum runs none through ultra', () => {
   assert.deepEqual([...REASONING_EFFORTS], ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
@@ -40,6 +41,20 @@ test('codex: none/minimal floor to low, the rest map by name, ultra stays ultra'
   // Every public effort resolves to a Codex value (the turn/start effort is a
   // free-form string, but a mapping must exist for each level).
   for (const effort of REASONING_EFFORTS) assert.ok(codexEffort(effort), `${effort} unmapped`);
+});
+
+test('grok: levels map by name, ultra maps to max (grok has no ultra)', () => {
+  assert.equal(grokEffort(null), undefined);
+  assert.equal(grokEffort(undefined), undefined);
+  assert.equal(grokEffort('none'), 'none');
+  assert.equal(grokEffort('minimal'), 'minimal');
+  assert.equal(grokEffort('low'), 'low');
+  assert.equal(grokEffort('medium'), 'medium');
+  assert.equal(grokEffort('high'), 'high');
+  assert.equal(grokEffort('xhigh'), 'xhigh');
+  assert.equal(grokEffort('max'), 'max');
+  assert.equal(grokEffort('ultra'), 'max');
+  for (const effort of REASONING_EFFORTS) assert.ok(grokEffort(effort), `${effort} unmapped`);
 });
 
 test('opencode: none omits the variant, max/ultra map to max, the rest map by name', () => {

@@ -1,0 +1,34 @@
+meta {
+  name: 09 List Sessions (grok)
+  type: http
+  seq: 48
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions?agent=grok
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: grok
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("grok sessions", function () {
+    expect(res.body.agent).to.equal("grok");
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The Grok chat sessions on this instance, selected with `?agent=grok`,
+  projected from grok's own session store (`~/.grok/sessions`) as
+  `{ agent, data }`. Omitting `?agent=` falls back to the instance's
+  default harness: not a merged listing. Unknown agent values return a
+  400 validation_error.
+}

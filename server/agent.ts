@@ -3,6 +3,7 @@ import { OpenClawAdapter } from './adapters/openclaw-adapter.js';
 import { ClaudeCodeAdapter } from './adapters/claude-code-adapter.js';
 import { CodexAdapter } from './adapters/codex-adapter.js';
 import { OpenCodeAdapter } from './adapters/opencode-adapter.js';
+import { GrokAdapter } from './adapters/grok-adapter.js';
 import type { AgentAdapter } from './adapters/types.js';
 import { resolveConfiguredDefaultAgent, SUPPORTED_AGENTS, type AgentType } from '../shared/types.js';
 import { optionalEnum, queryParam } from './errors.js';
@@ -18,6 +19,7 @@ const registry: Record<AgentType, GatewayAdapter> = {
   'claude-code': new ClaudeCodeAdapter(),
   codex: new CodexAdapter(),
   opencode: new OpenCodeAdapter(),
+  grok: new GrokAdapter(),
 };
 
 export function getAdapter(agent: AgentType): GatewayAdapter {
