@@ -344,6 +344,9 @@ export class GrokAdapter implements AgentAdapter {
   }
 
   async getMessages(sessionId: string): Promise<HermesMessage[]> {
+    // The route passes the raw path param; only UUID-shaped ids may touch the
+    // store path (a traversal-shaped id must not resolve outside it).
+    if (!UUID_RE.test(sessionId)) return [];
     const dir = sessionDir(sessionId);
     let raw: string;
     try {
