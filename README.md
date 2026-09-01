@@ -108,8 +108,9 @@ The gateway passes no credential: Claude Code runs on its own login. Until one
 exists, a turn fails with `auth_error` (and a hint to log in) and
 `GET /v1/health?agent=claude-code` reports `healthy: false`.
 
-`GET /v1/models?agent=claude-code` lists Claude Code's model aliases (`sonnet`,
-`opus`, `fable`, `haiku`, each the latest of its family); a turn's `model` is
+`GET /v1/models?agent=claude-code` lists Claude Code's own model catalog (the
+same rows its `/model` picker shows, so `label` and `description` name the
+versions each row resolves to, and the account's plan decides what is in it); a turn's `model` is
 passed through as is, and `reasoning_effort` maps onto Claude Code's dials
 (`none` → thinking disabled, `minimal|low` → effort `low`,
 `medium|high|xhigh|max` → the same effort, `ultra` → ultracode: `xhigh` effort
@@ -476,8 +477,9 @@ Codex, `healthy` also means an account is configured.
 works. It lists the models of one harness — the configured default, or the one
 named by an optional `?agent=` query param (e.g. `?agent=openclaw`) — and the
 response echoes which `agent` answered. Each entry carries the upstream provider
-in `owned_by` plus `label`, `source`, and `is_default`, so a UI can group models
-by provider and preselect the default:
+in `owned_by` plus `label`, `source`, `is_default`, and, where the harness
+publishes one, a one-line `description`, so a UI can group models by provider,
+say what each one is, and preselect the default:
 
 ```jsonc
 {
@@ -492,6 +494,7 @@ by provider and preselect the default:
       "created": 0,                  // we don't track per-model creation time
       "owned_by": "nous",            // upstream provider
       "label": "Hermes 4 405B",
+      "description": "…",            // only when the harness publishes one
       "source": "catalog",           // current | catalog | custom | alias
       "is_default": true
     }

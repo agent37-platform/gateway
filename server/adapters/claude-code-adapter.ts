@@ -9,6 +9,7 @@ import {
   listSessions as listClaudeSessions,
   query,
   renameSession as renameClaudeSession,
+  type ModelInfo as SDKModelInfo,
   type Options,
   type Query,
   type SDKAssistantMessage,
@@ -68,14 +69,14 @@ export function effortOptions(effort: ReasoningEffort | null | undefined): Pick<
   return { effort: EFFORT_MAP[effort] };
 }
 
-// Claude Code has no model catalog call; its own /model picker is this fixed
-// set of aliases, each resolving to the latest model of its family.
-const MODEL_ALIASES = [
-  { id: 'sonnet', label: 'Claude Sonnet (latest)' },
-  { id: 'opus', label: 'Claude Opus (latest)' },
-  { id: 'fable', label: 'Claude Fable (latest)' },
-  { id: 'haiku', label: 'Claude Haiku (latest)' },
-];
+// Claude Code has no catalog command; its own /model picker is the SDK's
+// supportedModels() control request, which needs a live query. The answer is
+// the customer's own list — it names the versions each alias resolves to and
+// tracks their plan and CLI release — and every ask spawns a `claude`, so it is
+// cached for a few minutes.
+const CATALOG_TTL_MS = 300_000;
+// The catalog's own "whatever Claude Code picks" row.
+const DEFAULT_MODEL_ID = 'default';
 
 // Claude Code's typed failure signal (SDKAssistantMessage.error) → the worker
 // codes server/errors.ts already knows how to render.
@@ -271,6 +272,29 @@ function loggedIn(): Promise<boolean> {
   });
 }
 
+// One query whose prompt never yields: enough of a session for the control
+// request, torn down as soon as it answers.
+async function modelCatalog(bin: string): Promise<SDKModelInfo[]> {
+  const abort = new AbortController();
+  async function* idle(): AsyncGenerator<SDKUserMessage> {
+    await new Promise<void>((resolve) => abort.signal.addEventListener('abort', () => resolve(), { once: true }));
+  }
+  const q = query({
+    prompt: idle(),
+    options: {
+      cwd: workspaceCwd(),
+      pathToClaudeCodeExecutable: bin,
+      settingSources: ['user'],
+      abortController: abort,
+    },
+  });
+  try {
+    return await q.supportedModels();
+  } finally {
+    abort.abort();
+  }
+}
+
 interface ActiveTurn {
   query: Query;
   abort: AbortController;
@@ -281,6 +305,7 @@ interface ActiveTurn {
 export class ClaudeCodeAdapter implements AgentAdapter {
   private readonly activeTurns = new Map<string, ActiveTurn>();
   private health: { at: number; ok: boolean } | null = null;
+  private catalog: { at: number; models: SDKModelInfo[] } | null = null;
 
   async *chatStream(sessionId: string, message: string, options?: AgentRunOptions): AsyncIterable<StreamEvent> {
     const bin = requireClaudeBin();
@@ -540,19 +565,25 @@ export class ClaudeCodeAdapter implements AgentAdapter {
   }
 
   async getModels(): Promise<AgentModelsResponse> {
-    requireClaudeBin();
+    const bin = requireClaudeBin();
+    const now = Date.now();
+    if (!this.catalog || now - this.catalog.at > CATALOG_TTL_MS) {
+      this.catalog = { at: now, models: await modelCatalog(bin) };
+    }
+    const models = this.catalog.models;
     return {
-      defaultModel: null,
+      defaultModel: models.some((model) => model.value === DEFAULT_MODEL_ID) ? DEFAULT_MODEL_ID : null,
       activeProvider: 'anthropic',
       groups: [
         {
           provider: 'anthropic',
-          models: MODEL_ALIASES.map((alias) => ({
-            id: alias.id,
-            label: alias.label,
-            source: 'alias',
+          models: models.map((model) => ({
+            id: model.value,
+            label: model.displayName || model.value,
+            description: model.description || null,
+            source: 'catalog',
             provider: 'anthropic',
-            isCurrentDefault: false,
+            isCurrentDefault: model.value === DEFAULT_MODEL_ID,
           })),
         },
       ],

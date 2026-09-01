@@ -132,12 +132,22 @@ test('claude-code responses complete, resume, and manage sessions on Claude Code
   );
   assert.equal(renamedList.data.find((s) => s.id === created.session_id)?.title, title);
 
-  // Models are Claude Code's fixed aliases.
-  const models = await jsonOk<{ agent: string; data: Array<{ id: string; owned_by: string; source: string }> }>(
-    await fetch(`${base}/v1/models?agent=claude-code`),
-  );
+  // Models are Claude Code's own catalog: every row names the model it resolves
+  // to, and one of them is the harness's default.
+  const models = await jsonOk<{
+    agent: string;
+    default_model: string | null;
+    data: Array<{ id: string; owned_by: string; source: string; label: string; description?: string; is_default: boolean }>;
+  }>(await fetch(`${base}/v1/models?agent=claude-code`));
   assert.equal(models.agent, 'claude-code');
-  assert.ok(models.data.some((m) => m.id === 'sonnet' && m.owned_by === 'anthropic' && m.source === 'alias'));
+  const sonnet = models.data.find((m) => m.id === 'sonnet');
+  assert.ok(sonnet, JSON.stringify(models.data));
+  assert.equal(sonnet.owned_by, 'anthropic');
+  assert.equal(sonnet.source, 'catalog');
+  assert.match(sonnet.label, /sonnet/i);
+  assert.ok((sonnet.description ?? '').length > 0);
+  assert.ok(models.default_model);
+  assert.equal(models.data.filter((m) => m.is_default).length, 1);
 
   const stream = await postJson(base, {
     agent: 'claude-code',

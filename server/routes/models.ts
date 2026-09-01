@@ -11,8 +11,8 @@ const MODEL_CREATED = 0;
 
 // GET /v1/models — the models a harness on this gateway can run on. The body is
 // the OpenAI list shape ({ object: "list", data: [...] }) so standard clients
-// work; the upstream provider rides in `owned_by` and label/source/is_default
-// are additive extensions a UI groups on. `?agent=` selects the harness (default
+// work; the upstream provider rides in `owned_by` and label/description/source/
+// is_default are additive extensions a UI groups on. `?agent=` selects the harness (default
 // = the gateway's configured default), and the response echoes which `agent`
 // answered.
 modelsRouter.get('/', async (req, res, next) => {
@@ -30,6 +30,7 @@ modelsRouter.get('/', async (req, res, next) => {
           created: MODEL_CREATED,
           owned_by: model.provider ?? group.provider,
           label: model.label,
+          ...(model.description ? { description: model.description } : {}),
           source: model.source,
           is_default: Boolean(model.isCurrentDefault),
         });
