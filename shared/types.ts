@@ -224,6 +224,9 @@ export interface AgentDefaults {
 export interface AgentModelOption {
   id: string;
   label: string;
+  /** One line from the harness about the model (what it resolves to, what it
+   *  is for). Only the harnesses that publish one fill it in. */
+  description?: string | null;
   source: 'current' | 'catalog' | 'custom' | 'alias';
   provider?: string | null;
   isCurrentDefault?: boolean;
@@ -278,6 +281,8 @@ export interface ModelInfo {
   created: number;
   owned_by: string;
   label: string;
+  /** Present only when the harness publishes one. */
+  description?: string;
   source: AgentModelOption['source'];
   is_default: boolean;
 }
