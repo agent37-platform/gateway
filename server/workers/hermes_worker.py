@@ -176,19 +176,23 @@ def _send(payload: dict[str, Any]) -> None:
 
 
 # Hermes hands the progress callback its display copy of the tool arguments (secrets already
-# redacted). Long values are clipped so one write_file cannot bloat the replay buffer.
+# redacted). Every string, however deeply nested, is clipped so one write_file cannot bloat the
+# replay buffer.
 TOOL_ARG_MAX_CHARS = 4000
 
 
+def _clip_tool_arg(value: Any) -> Any:
+    if isinstance(value, str) and len(value) > TOOL_ARG_MAX_CHARS:
+        return value[:TOOL_ARG_MAX_CHARS] + f"\n… ({len(value) - TOOL_ARG_MAX_CHARS} more characters)"
+    if isinstance(value, dict):
+        return {str(key): _clip_tool_arg(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_clip_tool_arg(item) for item in value]
+    return value
+
+
 def _display_tool_args(args: Any) -> dict[str, Any] | None:
-    if not isinstance(args, dict) or not args:
-        return None
-    clipped: dict[str, Any] = {}
-    for key, value in args.items():
-        if isinstance(value, str) and len(value) > TOOL_ARG_MAX_CHARS:
-            value = value[:TOOL_ARG_MAX_CHARS] + f"\n… ({len(value) - TOOL_ARG_MAX_CHARS} more characters)"
-        clipped[str(key)] = value
-    return clipped
+    return _clip_tool_arg(args) if isinstance(args, dict) and args else None
 
 
 def _result(request_id: str, data: dict[str, Any]) -> None:
