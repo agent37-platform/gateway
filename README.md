@@ -358,9 +358,10 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 | `response.created` | `{ id, session_id }` |
 | `response.reasoning.delta` | `{ text }` |
 | `response.output_text.delta` | `{ text }` |
-| `response.tool_call.started` | `{ tool, label }` |
-| `response.tool_call.completed` | `{ tool, duration_ms }` |
-| `response.tool_call.failed` | `{ tool, error }` |
+| `response.tool_call.generating` | `{ tool }`, the model has begun a call to `tool` and is still producing its arguments (Hermes) |
+| `response.tool_call.started` | `{ tool, label?, arguments? }`, `label` is the harness's one-line summary, `arguments` the tool's input, long values clipped (Hermes) |
+| `response.tool_call.completed` | `{ tool, duration_ms? }` |
+| `response.tool_call.failed` | `{ tool, error? }` |
 | `response.completed` | `{ output_text, usage, context }` |
 | `response.failed` | `{ error: { code, message } }` |
 

@@ -42,9 +42,10 @@ export interface StreamEvent {
   hint?: string;
   sessionId?: string;
   tool?: string;
-  status?: 'running' | 'completed' | 'error';
+  status?: 'generating' | 'running' | 'completed' | 'error';
   duration?: number;
   label?: string;
+  args?: Record<string, unknown>;
   context?: ContextUsage | null;
   usage?: TurnUsage | null;
   interrupted?: boolean;

@@ -170,7 +170,8 @@ export type ResponseStreamEvent =
   | { event: 'response.created'; data: { id: string; session_id: string } }
   | { event: 'response.reasoning.delta'; data: { text: string } }
   | { event: 'response.output_text.delta'; data: { text: string } }
-  | { event: 'response.tool_call.started'; data: { tool: string; label?: string } }
+  | { event: 'response.tool_call.generating'; data: { tool: string } }
+  | { event: 'response.tool_call.started'; data: { tool: string; label?: string; arguments?: Record<string, unknown> } }
   | { event: 'response.tool_call.completed'; data: { tool: string; duration_ms?: number } }
   | { event: 'response.tool_call.failed'; data: { tool: string; error?: string } }
   | { event: 'response.completed'; data: { output_text: string; usage: TurnUsage | null; context: ContextUsage | null } }
