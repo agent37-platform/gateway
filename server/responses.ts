@@ -94,12 +94,14 @@ export function beginResponse(req: ResponseRequest): BegunResponse {
 
 function emitToolProgress(responseId: string, event: StreamEvent): void {
   const tool = event.tool ?? 'tool';
-  if (event.status === 'completed') {
+  if (event.status === 'generating') {
+    emit(responseId, { event: 'response.tool_call.generating', data: { tool } });
+  } else if (event.status === 'completed') {
     emit(responseId, { event: 'response.tool_call.completed', data: { tool, duration_ms: event.duration } });
   } else if (event.status === 'error') {
     emit(responseId, { event: 'response.tool_call.failed', data: { tool, error: event.label } });
   } else {
-    emit(responseId, { event: 'response.tool_call.started', data: { tool, label: event.label } });
+    emit(responseId, { event: 'response.tool_call.started', data: { tool, label: event.label, arguments: event.args } });
   }
 }
 

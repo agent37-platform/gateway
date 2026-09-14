@@ -175,6 +175,22 @@ def _send(payload: dict[str, Any]) -> None:
         PROTOCOL_OUT.flush()
 
 
+# Hermes hands the progress callback its display copy of the tool arguments (secrets already
+# redacted). Long values are clipped so one write_file cannot bloat the replay buffer.
+TOOL_ARG_MAX_CHARS = 4000
+
+
+def _display_tool_args(args: Any) -> dict[str, Any] | None:
+    if not isinstance(args, dict) or not args:
+        return None
+    clipped: dict[str, Any] = {}
+    for key, value in args.items():
+        if isinstance(value, str) and len(value) > TOOL_ARG_MAX_CHARS:
+            value = value[:TOOL_ARG_MAX_CHARS] + f"\n… ({len(value) - TOOL_ARG_MAX_CHARS} more characters)"
+        clipped[str(key)] = value
+    return clipped
+
+
 def _result(request_id: str, data: dict[str, Any]) -> None:
     _send({"id": request_id, "type": "result", "data": data})
 
@@ -1401,6 +1417,7 @@ def _run_chat(request_id: str, request: dict[str, Any]) -> None:
                 "tool": tool_name,
                 "status": "running",
                 "label": str(preview) if preview else None,
+                "args": _display_tool_args(tool_args),
             })
             return
 
@@ -1414,6 +1431,11 @@ def _run_chat(request_id: str, request: dict[str, Any]) -> None:
                 "label": str(preview) if preview else None,
             })
 
+    # Fires when the model starts emitting a tool call, before its arguments have finished
+    # streaming, so a long write_file reads as that tool rather than as silence.
+    def on_tool_generating(name: Any) -> None:
+        _send({"id": request_id, "type": "tool_progress", "tool": str(name or "tool"), "status": "generating"})
+
     agent = _create_agent(
         session_id=session_id,
         requested_model=requested_model,
@@ -1423,6 +1445,7 @@ def _run_chat(request_id: str, request: dict[str, Any]) -> None:
             "stream_delta_callback": on_text_delta,
             "reasoning_callback": on_reasoning_delta,
             "tool_progress_callback": on_tool_progress,
+            "tool_gen_callback": on_tool_generating,
         },
     )
     _register_active_agent(_task_key_for(request), request_id, agent)

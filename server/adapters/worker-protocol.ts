@@ -66,9 +66,10 @@ export type WorkerEvent =
       id: string;
       type: 'tool_progress';
       tool?: string;
-      status?: 'running' | 'completed' | 'error';
+      status?: 'generating' | 'running' | 'completed' | 'error';
       duration?: number;
       label?: string | null;
+      args?: Record<string, unknown> | null;
     }
   | {
       id: string;

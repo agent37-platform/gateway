@@ -218,6 +218,23 @@ test('streaming responses can be replayed', async () => {
   assert.equal(replayEvents.at(-1)?.event, 'response.completed');
 });
 
+test('a tool call is announced while its arguments stream, then started with them', async () => {
+  const res = await postJson(base, {
+    input: 'Run the shell command `echo agent37-args-probe` with your terminal tool, then reply with its output.',
+    reasoning_effort: 'low',
+    stream: true,
+  });
+  assert.equal(res.status, 200);
+
+  const events = await new SseReader(res).drain();
+  const generatingAt = events.findIndex((event) => event.event === 'response.tool_call.generating');
+  const startedAt = events.findIndex((event) => event.event === 'response.tool_call.started');
+  assert.notEqual(startedAt, -1);
+  assert.ok(generatingAt !== -1 && generatingAt < startedAt, 'generating precedes started');
+  assert.match(JSON.stringify(events[startedAt].data.arguments), /agent37-args-probe/);
+  assert.equal(events.at(-1)?.event, 'response.completed');
+});
+
 test('an in-flight response blocks another turn and can be cancelled', async () => {
   const slow = await postJson(base, {
     input: 'Count from 1 to 2000, one number per line. Do not summarize.',
