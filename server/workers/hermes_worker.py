@@ -84,9 +84,9 @@ GATEWAY_PLATFORM_HINT = (
     "and ask: make the question (and the options, if any) your response, then "
     "end the turn and wait for their reply. Do not silently pick a branch and "
     "keep going. Low-stakes ambiguity: choose a sensible default and say so. "
-    "If you dispatched background work (a delegated subagent, a watched "
-    "process), its result is delivered to you at the start of a later turn, "
-    "so end your turn instead of waiting or polling for it."
+    "You cannot follow up once this response ends: delegated subagents return "
+    "their results inside the turn, so put the outcome in your response and "
+    "never promise to report back later."
 )
 KNOWN_PROVIDER_PREFIXES = {
     "anthropic",
@@ -1323,6 +1323,10 @@ def _drain_async_completions(session_id: str) -> list[str]:
     ``_drain_process_notifications`` so a completion restored into several
     worker processes is still delivered exactly once. Rows finished before a
     worker restart re-enter the queue via ``ProcessRegistry.__init__``.
+
+    Turns now bind ``async_delivery=False`` (see ``_run_chat``), so new
+    delegations finish inside their turn and never reach this queue; the drain
+    stays for work an older gateway dispatched before the instance updated.
     """
     try:
         from tools.process_registry import process_registry
@@ -1462,10 +1466,15 @@ def _run_chat(request_id: str, request: dict[str, Any]) -> None:
         from gateway.session_context import set_session_vars, clear_session_vars as _clear_session_vars
 
         clear_session_vars = _clear_session_vars
+        # A gateway turn is one request, one response: nothing can start a
+        # follow-up turn when detached work finishes. Declaring that makes
+        # delegate_task run its subagents inside the turn, so the final answer
+        # arrives in this response instead of waiting on the caller's next message.
         session_tokens = set_session_vars(
             chat_id=task_id,
             chat_name=task_title,
             session_key=session_id,
+            async_delivery=False,
         )
     except Exception:
         session_tokens = None
