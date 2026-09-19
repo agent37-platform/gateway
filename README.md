@@ -365,6 +365,11 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 | `response.completed` | `{ output_text, usage, context }` |
 | `response.failed` | `{ error: { code, message } }` |
 
+A turn ends with the agent's final answer. On Hermes, delegated subagents run
+inside the turn, so a `delegate_task` call can sit between `started` and
+`completed` for minutes while only keepalive comments flow; cancelling the turn
+stops them too.
+
 ### Follow up on a response
 
 | Action | Endpoint |
