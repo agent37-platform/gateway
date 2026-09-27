@@ -9,7 +9,8 @@ shape are the same whatever agent is behind it — so client code doesn't change
 when the agent does.
 
 Today it routes to **Hermes** (the default), **OpenClaw**, **Claude Code**,
-**Codex**, **OpenCode**, and **Grok**: pick per request with the `agent` field.
+**Codex**, **OpenCode**, **Grok**, and **Pi**: pick per request with the `agent`
+field.
 
 > Want the hosted API? Use [Agent37 Cloud](https://www.agent37.com/cloud). This
 > repo is the gateway service that powers an Agent37 agent.
@@ -273,6 +274,58 @@ Then route any turn to it with `"agent": "grok"`. The adapter runs the `grok`
 on `PATH`; set `GROK_BIN` to pin a specific binary and `GROK_HOME` to move its
 config/session store (default `~/.grok`).
 
+## How it talks to Pi
+
+The Pi adapter drives [Pi](https://pi.dev) (`@earendil-works/pi-coding-agent`)
+headless: one `pi --mode json` process per turn, reading the prompt on stdin and
+streaming JSONL events, exiting when the turn ends — no resident server, so an
+idle instance costs zero RAM. Project-local `.pi` files are trusted
+(`--approve`; the instance is the customer's own box, as with the other
+harnesses). Text and reasoning deltas, tool calls and their results stream back
+as the same SSE events, and cancel is real (the turn's process is interrupted).
+
+A gateway session id **is** a Pi session id (a UUID naming a JSONL file in pi's
+own store): the gateway resolves it before a turn begins. A turn with no
+`session_id` mints a UUID and hands it to pi with `--session-id`, which creates
+that session on its first turn and resumes it after (an id pi doesn't know is a
+`400 validation_error`). Sessions, history, and delete all work on pi's own
+store; the gateway keeps no index. `GET /v1/sessions?agent=pi` lists that store
+(including sessions started from a terminal), `GET /v1/sessions/{id}` projects
+the transcript, and `DELETE /v1/sessions/{id}` removes the session file. Nothing
+sets a pi session name through the gateway, so rename answers
+`405 rename_unsupported`.
+
+The gateway passes no credential: pi runs on its own auth — a provider key in
+the instance environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and the rest of
+pi's 20+ providers), `/login` on the box for a Claude, ChatGPT, or Copilot
+subscription, or a compatible endpoint in pi's `models.json` (which is where the
+Agent37 image writes the managed `agent37` provider). Until one resolves, a turn
+fails with the documented `auth_error` and `GET /v1/health?agent=pi` reports
+`healthy: false`.
+
+`GET /v1/models?agent=pi` lists what this box can actually run: pi reports a
+provider's models only once that provider's credentials resolve, so with none it
+is an empty list, never an error. A turn's `model` picks one (pi's
+`provider/id`, or any pattern pi accepts) and `reasoning_effort` maps onto pi's
+`--thinking` (`none` → `off`, `ultra` → `max`, the rest by name; pi clamps the
+level to the model's capabilities). `usage` sums the turn's assistant responses;
+`cost_usd` is pi's own costing, and `null` for a model with no price metadata
+(the managed `agent37` model, say).
+
+### Set up Pi
+
+Install Pi on the machine the gateway runs on and give it a credential:
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+export ANTHROPIC_API_KEY=sk-ant-...   # or any provider pi supports, or: pi, then /login
+```
+
+Then route any turn to it with `"agent": "pi"`. The adapter runs the `pi` on
+`PATH`; set `PI_BIN` to pin a specific binary, `PI_CODING_AGENT_DIR` to move its
+config (default `~/.pi/agent`) and `PI_CODING_AGENT_SESSION_DIR` to move its
+session store.
+
 ## Quickstart
 
 **Prerequisites:**
@@ -323,7 +376,7 @@ behind the host, which handles and forwards authentication.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `input` | string, required | The message or task. |
-| `agent` | string | `hermes`, `openclaw`, `claude-code`, `codex`, `opencode`, or `grok`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
+| `agent` | string | `hermes`, `openclaw`, `claude-code`, `codex`, `opencode`, `grok`, or `pi`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
 | `session_id` | string | Continue a conversation. Omit to start a new one. |
 | `files` | string[] | Absolute paths of files to attach (write them first with `PUT /v1/files/content`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
@@ -384,9 +437,9 @@ running response as `active_response_id`.
 
 | Action | Endpoint |
 | --- | --- |
-| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw\|claude-code\|codex\|opencode\|grok`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
+| List | `GET /v1/sessions` → `{ agent, data: [...] }` (select the harness with `?agent=hermes\|openclaw\|claude-code\|codex\|opencode\|grok\|pi`). Every row is the same shape regardless of harness: `{ id, title, last_active, message_count, preview }` — `title` is the harness's own editable title (what rename writes), `last_active` is epoch ms, and fields a harness doesn't track are `null`. |
 | Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history, context }` (`?agent=` to pick the harness; `context` is the session's last reported context window, null until a turn reports one) |
-| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label; Claude Code stores it as its custom session title; Codex stores it as the thread name; OpenCode stores it as the session title). A harness without an editable title (Grok) answers `405 rename_unsupported`. |
+| Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label; Claude Code stores it as its custom session title; Codex stores it as the thread name; OpenCode stores it as the session title). A harness without an editable title (Grok, Pi) answers `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |
 
 `active_response_id` is the id of the `in_progress` response on the session, or
@@ -470,8 +523,8 @@ and stored paths assume the instance's home directory stays stable.
 
 | Action | Endpoint |
 | --- | --- |
-| Models a harness can run | `GET /v1/models` (configured default; add `?agent=hermes\|openclaw\|claude-code\|codex\|opencode\|grok` to target one) |
-| Liveness + harness reachability | `GET /v1/health` (configured default; add `?agent=hermes\|openclaw\|claude-code\|codex\|opencode\|grok` to target one) |
+| Models a harness can run | `GET /v1/models` (configured default; add `?agent=hermes\|openclaw\|claude-code\|codex\|opencode\|grok\|pi` to target one) |
+| Liveness + harness reachability | `GET /v1/health` (configured default; add `?agent=hermes\|openclaw\|claude-code\|codex\|opencode\|grok\|pi` to target one) |
 | Version | `GET /v1/version` |
 
 `GET /v1/health` reports on the gateway's configured default harness, or the
@@ -539,7 +592,7 @@ Agent/worker failures surface their own `code` and `hint` where available (e.g.
 `auth_error`, `quota_exhausted`, `model_error`). One response runs at a time per
 session; sending a new turn while one is in flight returns `409 session_busy`,
 with the running response's id in `error.response_id`. On `codex`, `opencode`,
-and `grok`, which resolve the session before the turn starts, a turn that can't
+`grok`, and `pi`, which resolve the session before the turn starts, a turn that can't
 reach the harness (its binary isn't on the instance) is a real `503
 agent_unavailable`, not a `200` failed body.
 

@@ -1,0 +1,33 @@
+meta {
+  name: 09 List Sessions (pi)
+  type: http
+  seq: 56
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions?agent=pi
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: pi
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("pi sessions", function () {
+    expect(res.body.agent).to.equal("pi");
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The Pi chat sessions on this instance, selected with `?agent=pi`,
+  projected from pi's own session store (one JSONL file per session).
+  Omitting `?agent=` falls back to the instance's default harness: not a
+  merged listing. Unknown agent values return a 400 validation_error.
+}

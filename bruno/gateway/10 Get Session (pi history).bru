@@ -1,0 +1,34 @@
+meta {
+  name: 10 Get Session (pi history)
+  type: http
+  seq: 57
+}
+
+get {
+  url: {{baseUrl}}/v1/sessions/{{piSessionId}}?agent=pi
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: pi
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("includes transcript history", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("piSessionId"));
+    expect(res.body.agent).to.equal("pi");
+    expect(res.body.history).to.be.an("array");
+  });
+}
+
+docs {
+  The Pi session plus its transcript. Reuses `piSessionId` saved by
+  "04 Create Response (pi)". History is projected on demand from pi's own
+  session file: the gateway never duplicates messages. An unknown or
+  deleted id projects to an empty array.
+}

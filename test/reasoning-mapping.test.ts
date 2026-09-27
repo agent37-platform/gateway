@@ -9,6 +9,7 @@ import { THINKING_MAP } from '../server/adapters/openclaw-adapter.js';
 import { codexEffort } from '../server/adapters/codex-adapter.js';
 import { opencodeVariant } from '../server/adapters/opencode-adapter.js';
 import { grokEffort } from '../server/adapters/grok-adapter.js';
+import { piThinking } from '../server/adapters/pi-adapter.js';
 
 test('the public enum runs none through ultra', () => {
   assert.deepEqual([...REASONING_EFFORTS], ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
@@ -80,4 +81,17 @@ test('openclaw: every effort has a thinking level', () => {
   assert.equal(THINKING_MAP.none, 'off');
   assert.equal(THINKING_MAP.max, 'max');
   assert.equal(THINKING_MAP.ultra, 'ultra');
+});
+
+test('pi: none is off, the rest map by name, ultra floors to max', () => {
+  assert.equal(piThinking(null), undefined);
+  assert.equal(piThinking(undefined), undefined);
+  assert.equal(piThinking('none'), 'off');
+  assert.equal(piThinking('minimal'), 'minimal');
+  assert.equal(piThinking('low'), 'low');
+  assert.equal(piThinking('medium'), 'medium');
+  assert.equal(piThinking('high'), 'high');
+  assert.equal(piThinking('xhigh'), 'xhigh');
+  assert.equal(piThinking('max'), 'max');
+  assert.equal(piThinking('ultra'), 'max');
 });

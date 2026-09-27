@@ -1,0 +1,36 @@
+meta {
+  name: 03 List Models (pi)
+  type: http
+  seq: 52
+}
+
+get {
+  url: {{baseUrl}}/v1/models?agent=pi
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: pi
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("is a Pi model list", function () {
+    expect(res.body.object).to.equal("list");
+    expect(res.body.agent).to.equal("pi");
+    expect(res.body.data).to.be.an("array");
+  });
+}
+
+docs {
+  The models the Pi harness can run, selected with `?agent=pi`. Pi lists a
+  provider's models only once that provider's credentials resolve, so this
+  is what this box can actually run; with no credential at all the list is
+  empty (200, `default_model: null`), never an auth error. Needs Pi
+  installed on this machine (`pi` on PATH, or PI_BIN): otherwise the
+  gateway returns 503 agent_unavailable.
+}
