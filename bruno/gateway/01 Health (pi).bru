@@ -1,0 +1,36 @@
+meta {
+  name: 01 Health (pi)
+  type: http
+  seq: 51
+}
+
+get {
+  url: {{baseUrl}}/v1/health?agent=pi
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: pi
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("reports Pi health", function () {
+    expect(res.body.ok).to.equal(true);
+    expect(res.body.agent).to.equal("pi");
+    expect(res.body.healthy).to.be.a("boolean");
+  });
+}
+
+docs {
+  Liveness + whether the Pi harness backend is reachable, selected with
+  `?agent=pi`. The gateway runs Pi headless, one `pi --mode json` process
+  per turn. `healthy` is false until this machine has Pi installed (`pi`
+  on PATH, or PI_BIN) and some provider's credentials resolve (a key in
+  the environment, `/login` on the box, or a compatible endpoint in pi's
+  models.json).
+}

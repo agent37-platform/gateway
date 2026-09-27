@@ -1,0 +1,32 @@
+meta {
+  name: 12 Delete Session (pi)
+  type: http
+  seq: 58
+}
+
+delete {
+  url: {{baseUrl}}/v1/sessions/{{piSessionId}}?agent=pi
+  body: none
+  auth: none
+}
+
+params:query {
+  agent: pi
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("deleted", function () {
+    expect(res.body.deleted).to.equal(true);
+  });
+}
+
+docs {
+  Permanently remove the Pi session from pi's own store (its JSONL file).
+  Other sessions on the instance are untouched. Nothing sets a pi session
+  name through the gateway, so there is no "15 Rename Session (pi)": a
+  rename PATCH answers 405 rename_unsupported.
+}
