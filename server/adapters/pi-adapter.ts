@@ -423,32 +423,29 @@ export class PiAdapter implements AgentAdapter {
     } catch {
       return [];
     }
-    // A transcript is pi's whole session file, so the reads are async and concurrent:
-    // done synchronously they would hold the event loop for the length of every
-    // conversation on the box.
-    const rows = await Promise.all(
-      names.map(async (name): Promise<SessionSummary | null> => {
-        const id = /_([0-9a-f-]{36})\.jsonl$/i.exec(name)?.[1];
-        if (!id) return null;
-        const path = join(dir, name);
-        let title: string | null = null;
-        let messages = 0;
-        for (const entry of parseEntries(await readFile(path, 'utf8').catch(() => ''))) {
-          if (entry.type === 'session_info') title = entry.name?.trim() || null;
-          else if (entry.type === 'message' && (entry.message?.role === 'user' || entry.message?.role === 'assistant')) messages += 1;
-        }
-        let lastActive: number | null = null;
-        try {
-          lastActive = Math.round(statSync(path).mtimeMs);
-        } catch {
-          // the file went away mid-list
-        }
-        return { id, title, last_active: lastActive, message_count: messages, preview: null };
-      }),
-    );
-    return rows
-      .filter((row): row is SessionSummary => row !== null)
-      .sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0));
+    // A transcript is pi's whole session file. The reads are async so a list request
+    // never holds the event loop for the length of every conversation on the box, and
+    // sequential so it never holds more than one of them in memory at a time.
+    const rows: SessionSummary[] = [];
+    for (const name of names) {
+      const id = /_([0-9a-f-]{36})\.jsonl$/i.exec(name)?.[1];
+      if (!id) continue;
+      const path = join(dir, name);
+      let title: string | null = null;
+      let messages = 0;
+      for (const entry of parseEntries(await readFile(path, 'utf8').catch(() => ''))) {
+        if (entry.type === 'session_info') title = entry.name?.trim() || null;
+        else if (entry.type === 'message' && (entry.message?.role === 'user' || entry.message?.role === 'assistant')) messages += 1;
+      }
+      let lastActive: number | null = null;
+      try {
+        lastActive = Math.round(statSync(path).mtimeMs);
+      } catch {
+        // the file went away mid-list
+      }
+      rows.push({ id, title, last_active: lastActive, message_count: messages, preview: null });
+    }
+    return rows.sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0));
   }
 
   async getMessages(sessionId: string): Promise<HermesMessage[]> {
