@@ -1,6 +1,7 @@
 import { execFile, execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
@@ -210,6 +211,20 @@ function messageText(content: unknown): string {
     .join('');
 }
 
+/** A pi session file: one JSON entry per line. A partially written last line is skipped. */
+function parseEntries(raw: string): PiEntry[] {
+  const entries: PiEntry[] = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      entries.push(JSON.parse(line) as PiEntry);
+    } catch {
+      // a partially written last line — skip it
+    }
+  }
+  return entries;
+}
+
 interface ActiveTurn {
   child: ChildProcessWithoutNullStreams;
   interrupted: boolean;
@@ -246,6 +261,10 @@ export class PiAdapter implements AgentAdapter {
     const child = spawn(bin, args, { cwd: workspaceCwd(), env: childEnv() });
     const turn: ActiveTurn = { child, interrupted: false };
     this.activeTurns.set(sessionId, turn);
+    // A child that dies before reading its stdin (a bin that cannot exec, an argument
+    // pi rejects) makes this write EPIPE; unhandled, that error takes the gateway down
+    // instead of this one turn, which the stderr path below reports.
+    child.stdin.on('error', () => {});
     child.stdin.end(message);
 
     let stderrTail = '';
@@ -306,10 +325,14 @@ export class PiAdapter implements AgentAdapter {
             outputTokens += usage.output ?? 0;
             inputTokens += Math.max(0, (usage.totalTokens ?? 0) - (usage.output ?? 0));
             costUsd += usage.cost?.total ?? 0;
-            // A failed provider call ends the turn with stopReason "error".
-            if (message?.stopReason === 'error') {
-              errorEvent = errorEventOf(message.errorMessage?.trim() || 'Pi ended the turn on an error.');
-            }
+            // A failed provider call ends the turn with stopReason "error". Pi retries
+            // some of those itself (auto_retry_*, overflow compaction), and a run is
+            // several responses anyway, so only the latest outcome counts: a recovered
+            // turn must not report the error it recovered from.
+            errorEvent =
+              message?.stopReason === 'error'
+                ? errorEventOf(message.errorMessage?.trim() || 'Pi ended the turn on an error.')
+                : undefined;
             break;
           }
           case 'agent_settled':
@@ -400,45 +423,32 @@ export class PiAdapter implements AgentAdapter {
     } catch {
       return [];
     }
-    const rows: SessionSummary[] = [];
-    for (const name of names) {
-      const id = /_([0-9a-f-]{36})\.jsonl$/i.exec(name)?.[1];
-      if (!id) continue;
-      const path = join(dir, name);
-      let title: string | null = null;
-      let messages = 0;
-      for (const entry of this.readEntries(path)) {
-        if (entry.type === 'session_info') title = entry.name?.trim() || null;
-        else if (entry.type === 'message' && (entry.message?.role === 'user' || entry.message?.role === 'assistant')) messages += 1;
-      }
-      let lastActive: number | null = null;
-      try {
-        lastActive = Math.round(statSync(path).mtimeMs);
-      } catch {
-        // the file went away mid-list
-      }
-      rows.push({ id, title, last_active: lastActive, message_count: messages, preview: null });
-    }
-    return rows.sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0));
-  }
-
-  private readEntries(path: string): PiEntry[] {
-    let raw: string;
-    try {
-      raw = readFileSync(path, 'utf8');
-    } catch {
-      return [];
-    }
-    const entries: PiEntry[] = [];
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        entries.push(JSON.parse(line) as PiEntry);
-      } catch {
-        // a partially written last line — skip it
-      }
-    }
-    return entries;
+    // A transcript is pi's whole session file, so the reads are async and concurrent:
+    // done synchronously they would hold the event loop for the length of every
+    // conversation on the box.
+    const rows = await Promise.all(
+      names.map(async (name): Promise<SessionSummary | null> => {
+        const id = /_([0-9a-f-]{36})\.jsonl$/i.exec(name)?.[1];
+        if (!id) return null;
+        const path = join(dir, name);
+        let title: string | null = null;
+        let messages = 0;
+        for (const entry of parseEntries(await readFile(path, 'utf8').catch(() => ''))) {
+          if (entry.type === 'session_info') title = entry.name?.trim() || null;
+          else if (entry.type === 'message' && (entry.message?.role === 'user' || entry.message?.role === 'assistant')) messages += 1;
+        }
+        let lastActive: number | null = null;
+        try {
+          lastActive = Math.round(statSync(path).mtimeMs);
+        } catch {
+          // the file went away mid-list
+        }
+        return { id, title, last_active: lastActive, message_count: messages, preview: null };
+      }),
+    );
+    return rows
+      .filter((row): row is SessionSummary => row !== null)
+      .sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0));
   }
 
   async getMessages(sessionId: string): Promise<HermesMessage[]> {
@@ -450,7 +460,7 @@ export class PiAdapter implements AgentAdapter {
 
     const out: HermesMessage[] = [];
     let index = 0;
-    for (const entry of this.readEntries(path)) {
+    for (const entry of parseEntries(await readFile(path, 'utf8').catch(() => ''))) {
       index += 1;
       const message = entry.message;
       if (entry.type !== 'message' || (message?.role !== 'user' && message?.role !== 'assistant')) continue;
