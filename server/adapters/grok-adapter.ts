@@ -205,8 +205,9 @@ export class GrokAdapter implements AgentAdapter {
     // The prompt rides a file: as an argv value (`-p`) the kernel caps it at
     // 128 KiB, far under the 2 MB body the gateway accepts, and a longer one
     // fails at spawn with nothing on stdout or stderr to explain it.
+    const cwd = workspaceCwd();
     const promptFile = join(tmpdir(), `a37gw-grok-${randomUUID()}.txt`);
-    writeFileSync(promptFile, message, 'utf8');
+    writeFileSync(promptFile, message, { encoding: 'utf8', mode: 0o600 });
     const args = [
       '--prompt-file',
       promptFile,
@@ -220,7 +221,7 @@ export class GrokAdapter implements AgentAdapter {
     const effort = grokEffort(settings?.reasoningEffort);
     if (effort) args.push('--reasoning-effort', effort);
 
-    const child = spawn(bin, args, { cwd: workspaceCwd(), env: childEnv() });
+    const child = spawn(bin, args, { cwd, env: childEnv() });
     const turn: ActiveTurn = { child, interrupted: false };
     this.activeTurns.set(sessionId, turn);
 
