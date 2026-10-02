@@ -232,7 +232,8 @@ Agent37 image writes the managed `agent37` provider there.
 ## How it talks to Grok
 
 The Grok adapter drives [Grok Build](https://docs.x.ai/build/overview) (xAI's
-`grok` CLI) headless: one `grok -p` process per turn, streaming NDJSON
+`grok` CLI) headless: one single-turn process per turn, reading the prompt from
+a file (as an argv value the kernel would cap it at 128 KiB), streaming NDJSON
 (`--output-format streaming-json`), exiting when the turn ends — no resident
 server, so an idle instance costs zero RAM. Tools run auto-approved
 (`--always-approve`; the instance is the customer's own box, as with the other

@@ -221,3 +221,21 @@ test('an in-flight grok turn can be cancelled', { skip: grokSkip }, async () => 
 
   await fetch(`${base}/v1/sessions/${sessionId}?agent=grok`, { method: 'DELETE' });
 });
+
+test('a grok prompt past the argv size limit completes', { skip: grokSkip }, async () => {
+  // One argv value is capped at 128 KiB by the kernel, so a prompt this size
+  // used to die at spawn; the adapter hands grok a prompt file instead.
+  const filler = 'The quarterly report notes that revenue grew in every region. '.repeat(2200);
+  const big = await jsonOk<ResponseBody>(
+    await postJson(base, {
+      agent: 'grok',
+      input: `${filler}\n\nIgnore the text above. Reply with exactly one word: BANANA`,
+      reasoning_effort: 'low',
+    }),
+  );
+  assert.equal(big.status, 'completed', JSON.stringify(big.error));
+  assert.match(big.output_text, /BANANA/i);
+  assert.ok(big.usage && big.usage.input_tokens > 20_000, JSON.stringify(big.usage));
+
+  await fetch(`${base}/v1/sessions/${big.session_id}?agent=grok`, { method: 'DELETE' });
+});
