@@ -1,7 +1,7 @@
 import { execFile, execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type {
@@ -18,7 +18,7 @@ import { epochMillis } from './types.js';
 import { resolveWorkspaceDir } from '../paths.js';
 import { validationError } from '../errors.js';
 
-// The adapter drives Grok Build (`grok`) headless: one `grok -p` process per
+// The adapter drives Grok Build (`grok`) headless: one single-turn process per
 // turn, streaming NDJSON (`--output-format streaming-json`), exiting when the
 // turn ends — so at-rest RAM is zero and there is no resident server to manage.
 // Session ids are UUIDs living in grok's own store
@@ -202,9 +202,14 @@ export class GrokAdapter implements AgentAdapter {
     const bin = requireGrokBin();
     const settings = options?.settings;
     const isNew = !existsSync(sessionDir(sessionId));
+    // The prompt rides a file: as an argv value (`-p`) the kernel caps it at
+    // 128 KiB, far under the 2 MB body the gateway accepts, and a longer one
+    // fails at spawn with nothing on stdout or stderr to explain it.
+    const promptFile = join(tmpdir(), `a37gw-grok-${randomUUID()}.txt`);
+    writeFileSync(promptFile, message, 'utf8');
     const args = [
-      '-p',
-      message,
+      '--prompt-file',
+      promptFile,
       isNew ? '-s' : '-r',
       sessionId,
       '--output-format',
@@ -284,6 +289,7 @@ export class GrokAdapter implements AgentAdapter {
       await exited;
       clearTimeout(turn.killTimer);
       this.activeTurns.delete(sessionId);
+      rmSync(promptFile, { force: true });
     }
 
     if (turn.interrupted) {
