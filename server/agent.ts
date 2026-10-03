@@ -35,9 +35,10 @@ export function getAdapter(agent: AgentType, profile?: string | null): GatewayAd
 // Hermes profiles: one instance can hold several Hermes homes under
 // ~/.hermes/profiles/<name> (each with its own SOUL, skills, memory, config and
 // sessions). A request picks one with `profile`; each profile runs its own
-// worker (HERMES_HOME = the profile directory), spawned on first use, stopped
-// after PROFILE_IDLE_MS idle, and capped at MAX_PROFILE_WORKERS live at once
-// (least recently used idle worker goes first) so RAM stays bounded.
+// worker (HERMES_HOME = the profile directory), spawned on first use and stopped
+// after PROFILE_IDLE_MS idle. Starting one stops least-recently-used idle workers
+// to keep at most MAX_PROFILE_WORKERS alive. A worker mid-turn is never stopped,
+// so a burst of busy profiles can briefly run more; that beats failing the turn.
 // ---------------------------------------------------------------------------
 
 const PROFILE_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;

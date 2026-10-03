@@ -389,9 +389,13 @@ class HermesWorkerClient {
     this.readline = createInterface({ input: child.stdout });
     this.readline.on('line', (line) => this.handleLine(line));
     child.stderr.on('data', (chunk) => process.stderr.write(String(chunk)));
-    child.on('error', (error) => this.handleExit(error));
+    // Only the current child may tear the client down: a stopped worker that exits after its
+    // replacement spawned (an idle profile worker coming straight back) must not touch it.
+    child.on('error', (error) => {
+      if (this.child === child) this.handleExit(error);
+    });
     child.on('exit', (code, signal) => {
-      this.handleExit(new Error(`Hermes worker exited (${signal ?? code ?? 'unknown'})`));
+      if (this.child === child) this.handleExit(new Error(`Hermes worker exited (${signal ?? code ?? 'unknown'})`));
     });
   }
 

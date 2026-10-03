@@ -447,9 +447,11 @@ running response as `active_response_id`.
 
 On Hermes, every sessions call takes `?profile=` to read that profile's own
 session store (omitted = the default Hermes home). Each profile runs in its own
-Hermes worker, started on first use and stopped after 10 idle minutes; at most
-`GATEWAY_MAX_PROFILE_WORKERS` (default 4) run at once, the least recently used
-idle one stopping first. `GET /v1/models?profile=` reads that profile's config.
+Hermes worker, started on first use and stopped after 10 idle minutes. Starting
+one stops the least recently used idle workers to keep at most
+`GATEWAY_MAX_PROFILE_WORKERS` (default 4) alive; a worker in the middle of a turn
+is never stopped, so many profiles busy at once can briefly run more.
+`GET /v1/models?profile=` reads that profile's config.
 
 `active_response_id` is the id of the `in_progress` response on the session, or
 null when it is idle. Harnesses persist a turn's messages at turn end, so while
