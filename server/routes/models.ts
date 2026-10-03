@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { AgentType, ModelInfo, ModelsListResponse } from '../../shared/types.js';
-import { getAdapter, agentFromQuery } from '../agent.js';
+import { getAdapter, agentFromQuery, profileFromRequest } from '../agent.js';
 import { gatewayErrorFromWorker } from '../errors.js';
 
 export const modelsRouter = Router();
@@ -14,13 +14,13 @@ const MODEL_CREATED = 0;
 // work; the upstream provider rides in `owned_by` and label/description/source/
 // is_default are additive extensions a UI groups on. `?agent=` selects the harness (default
 // = the gateway's configured default), and the response echoes which `agent`
-// answered.
+// answered. On Hermes, `?profile=` reads that profile's config.
 modelsRouter.get('/', async (req, res, next) => {
   let agent: AgentType | undefined;
   try {
     // `?agent=` (omitted or empty) falls back to the configured default harness.
     agent = agentFromQuery(req.query.agent);
-    const models = await getAdapter(agent).getModels();
+    const models = await getAdapter(agent, profileFromRequest(req.query.profile, agent)).getModels();
     const data: ModelInfo[] = [];
     for (const group of models.groups) {
       for (const model of group.models) {

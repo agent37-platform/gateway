@@ -41,6 +41,7 @@ export interface ResponseRequest {
   sessionId?: string;
   input: string;
   agent: AgentType;
+  profile: string | null;
   model: string | null;
   provider: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -51,6 +52,7 @@ export interface BegunResponse {
   responseId: string;
   sessionId: string;
   agent: AgentType;
+  profile: string | null;
   settings: AgentRunSettings;
   model: string | null;
   provider: string | null;
@@ -75,6 +77,7 @@ export function beginResponse(req: ResponseRequest): BegunResponse {
     id: responseId,
     session_id: sessionId,
     agent,
+    profile: req.profile,
     model: req.model,
     provider: req.provider,
     metadata: req.metadata,
@@ -89,7 +92,7 @@ export function beginResponse(req: ResponseRequest): BegunResponse {
     reasoningEffort: req.reasoningEffort ?? undefined,
   };
 
-  return { responseId, sessionId, agent, settings, model: req.model, provider: req.provider };
+  return { responseId, sessionId, agent, profile: req.profile, settings, model: req.model, provider: req.provider };
 }
 
 function emitToolProgress(responseId: string, event: StreamEvent): void {
@@ -112,7 +115,7 @@ function emitToolProgress(responseId: string, event: StreamEvent): void {
  * those become a `failed` response.
  */
 export async function driveResponse(begun: BegunResponse, input: string): Promise<ResponseObject> {
-  const { responseId, sessionId, agent, settings, model, provider } = begun;
+  const { responseId, sessionId, agent, profile, settings, model, provider } = begun;
 
   let outputText = '';
   let usage: TurnUsage | null = null;
@@ -122,7 +125,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
   let sawTerminal = false;
 
   try {
-    for await (const event of getAdapter(agent).chatStream(sessionId, input, { settings })) {
+    for await (const event of getAdapter(agent, profile).chatStream(sessionId, input, { settings })) {
       switch (event.type) {
         case 'text_delta':
           if (event.content) {
@@ -183,6 +186,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
       session_id: sessionId,
       status,
       agent,
+      profile,
       model,
       provider,
       output_text: outputText,
@@ -203,7 +207,7 @@ export async function cancelResponse(responseId: string): Promise<ResponseObject
   const response = getResponse(responseId);
   if (!response) throw responseNotFound(responseId);
   if (response.status === 'in_progress') {
-    await getAdapter(response.agent).interruptChat(response.session_id);
+    await getAdapter(response.agent, response.profile).interruptChat(response.session_id);
   }
   return getResponse(responseId) ?? response;
 }

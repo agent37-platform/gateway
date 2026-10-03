@@ -171,12 +171,32 @@ function createAsyncQueue<T>() {
   };
 }
 
+/** A worker for one Hermes home. `hermesHome` (a profile directory) is passed to the
+ *  worker as HERMES_HOME; omitted, the worker inherits the gateway's own. With
+ *  `idleMs`, the worker exits after that long with nothing in flight and respawns on
+ *  the next call. */
+export interface HermesWorkerOptions {
+  hermesHome?: string;
+  idleMs?: number;
+}
+
 class HermesWorkerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private readline: Interface | null = null;
   private pending = new Map<string, Pending>();
   private ready = false;
   private readyPromise: Promise<void> | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(private readonly opts: HermesWorkerOptions = {}) {}
+
+  get running(): boolean {
+    return this.child !== null;
+  }
+
+  get busy(): boolean {
+    return this.pending.size > 0;
+  }
 
   async start(): Promise<void> {
     this.ensureStarted();
@@ -203,6 +223,7 @@ class HermesWorkerClient {
   }
 
   async stop(signal: NodeJS.Signals = 'SIGTERM'): Promise<void> {
+    this.clearIdle();
     const child = this.child;
     this.child = null;
     this.ready = false;
@@ -248,20 +269,26 @@ class HermesWorkerClient {
   }
 
   async request<T extends WorkerResult>(input: WorkerRequest['type'] | WorkerRequestInput, timeoutMs?: number): Promise<T> {
-    await this.start();
-    const id = randomUUID();
-    const request = typeof input === 'string'
-      ? { id, type: input } as WorkerRequest
-      : { ...input, id } as WorkerRequest;
-    return await this.sendRequest<T>(request, timeoutMs);
+    this.clearIdle();
+    try {
+      await this.start();
+      const id = randomUUID();
+      const request = typeof input === 'string'
+        ? { id, type: input } as WorkerRequest
+        : { ...input, id } as WorkerRequest;
+      return await this.sendRequest<T>(request, timeoutMs);
+    } finally {
+      this.armIdle();
+    }
   }
 
   async *stream(request: Omit<Extract<WorkerRequest, { type: 'chat' }>, 'id'>): AsyncIterable<WorkerEvent> {
-    await this.start();
+    this.clearIdle();
     const id = randomUUID();
     const queue = createAsyncQueue<WorkerEvent>();
 
     try {
+      await this.start();
       this.pending.set(id, {
         kind: 'stream',
         push: queue.push,
@@ -276,7 +303,24 @@ class HermesWorkerClient {
       }
     } finally {
       this.pending.delete(id);
+      this.armIdle();
     }
+  }
+
+  private clearIdle(): void {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
+
+  private armIdle(): void {
+    this.clearIdle();
+    if (!this.opts.idleMs || this.pending.size > 0 || !this.child) return;
+    this.idleTimer = setTimeout(() => {
+      if (this.pending.size === 0) void this.stop();
+    }, this.opts.idleMs);
+    this.idleTimer.unref();
   }
 
   private async sendRequest<T extends WorkerResult>(request: WorkerRequest, timeoutMs?: number): Promise<T> {
@@ -336,6 +380,7 @@ class HermesWorkerClient {
         // Hermes only registers the agent-facing `cronjob` tool (self-scheduling
         // via chat) when the process declares itself a gateway session.
         HERMES_GATEWAY_SESSION: '1',
+        ...(this.opts.hermesHome ? { HERMES_HOME: this.opts.hermesHome } : {}),
       },
     });
 
@@ -410,7 +455,21 @@ class HermesWorkerClient {
 }
 
 export class HermesWorkerAdapter implements AgentAdapter, GoalCapableAdapter {
-  private client = new HermesWorkerClient();
+  private client: HermesWorkerClient;
+
+  constructor(options: HermesWorkerOptions = {}) {
+    this.client = new HermesWorkerClient(options);
+  }
+
+  /** True while the worker process is alive. */
+  get running(): boolean {
+    return this.client.running;
+  }
+
+  /** True while a request or turn is in flight on the worker. */
+  get busy(): boolean {
+    return this.client.busy;
+  }
 
   async start(): Promise<void> {
     await this.client.start();

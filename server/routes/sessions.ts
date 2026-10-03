@@ -1,22 +1,23 @@
 import { Router } from 'express';
 import type { AgentType, SessionMessage } from '../../shared/types.js';
-import { getAdapter, agentFromQuery } from '../agent.js';
+import { getAdapter, agentFromQuery, profileFromRequest } from '../agent.js';
 import { gatewayErrorFromWorker, renameUnsupported, validationError } from '../errors.js';
 import { activeResponseForSession } from '../live-runs.js';
 import { forgetSessionContext, sessionContextFor } from '../responses.js';
 
 export const sessionsRouter = Router();
 
-// GET /v1/sessions?agent= — list a harness's sessions from its own store,
+// GET /v1/sessions?agent=&profile= — list a harness's sessions from its own store,
 // projected into the shared SessionSummary shape (id, title, last_active,
 // message_count, preview) so clients never branch on the harness. The harness
 // owns the transcript and the index; the gateway keeps none. Harnesses without
-// a list API return [].
+// a list API return []. On Hermes, `?profile=` (on every sessions route) reads
+// that profile's own session store.
 sessionsRouter.get('/', async (req, res, next) => {
   let agent: AgentType | undefined;
   try {
     agent = agentFromQuery(req.query.agent);
-    const data = await getAdapter(agent).listSessions();
+    const data = await getAdapter(agent, profileFromRequest(req.query.profile, agent)).listSessions();
     res.json({ agent, data });
   } catch (error) {
     next(gatewayErrorFromWorker(error, 'Could not list sessions', agent));
@@ -33,7 +34,7 @@ sessionsRouter.get('/:id', async (req, res, next) => {
   let agent: AgentType | undefined;
   try {
     agent = agentFromQuery(req.query.agent);
-    const messages = await getAdapter(agent).getMessages(req.params.id);
+    const messages = await getAdapter(agent, profileFromRequest(req.query.profile, agent)).getMessages(req.params.id);
     const history: SessionMessage[] = messages.map((m) => ({
       id: m.id,
       session_id: req.params.id,
@@ -59,7 +60,7 @@ sessionsRouter.delete('/:id', async (req, res, next) => {
   let agent: AgentType | undefined;
   try {
     agent = agentFromQuery(req.query.agent);
-    const deleted = await getAdapter(agent).deleteSession(req.params.id);
+    const deleted = await getAdapter(agent, profileFromRequest(req.query.profile, agent)).deleteSession(req.params.id);
     forgetSessionContext(req.params.id);
     res.json({ id: req.params.id, deleted });
   } catch (error) {
@@ -74,7 +75,7 @@ sessionsRouter.patch('/:id', async (req, res, next) => {
   let agent: AgentType | undefined;
   try {
     agent = agentFromQuery(req.query.agent);
-    const adapter = getAdapter(agent);
+    const adapter = getAdapter(agent, profileFromRequest(req.query.profile, agent));
     if (!adapter.renameSession) throw renameUnsupported(agent);
 
     const title = (req.body as { title?: unknown } | undefined)?.title;
