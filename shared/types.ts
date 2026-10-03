@@ -91,6 +91,8 @@ export interface ResponseObject {
   session_id: string;
   status: ResponseStatus;
   agent: AgentType;
+  /** The Hermes profile the turn ran on; null for the instance's own Hermes home. */
+  profile: string | null;
   model: string | null;
   provider: string | null;
   output_text: string;

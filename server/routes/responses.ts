@@ -6,7 +6,7 @@ import {
   SUPPORTED_AGENTS,
 } from '../../shared/types.js';
 import { GatewayError, gatewayErrorFromWorker, isRecord, optionalEnum, responseNotFound, validationError } from '../errors.js';
-import { getAdapter, INSTANCE_DEFAULT_AGENT } from '../agent.js';
+import { getAdapter, INSTANCE_DEFAULT_AGENT, profileFromRequest } from '../agent.js';
 import { resolveHomeAwarePath } from '../paths.js';
 import { initSSE, writeStreamEvent } from '../sse.js';
 import { attach, hasRun } from '../live-runs.js';
@@ -82,6 +82,7 @@ function parseResponseBody(body: unknown): { request: ResponseRequest; stream: b
   }
 
   const agent = optionalEnum(b.agent, 'agent', SUPPORTED_AGENTS, INSTANCE_DEFAULT_AGENT);
+  const profile = profileFromRequest(b.profile, agent);
 
   const mode = optionalEnum(b.mode, 'mode', RESPONSE_MODES, 'chat');
   if (mode === 'goal') {
@@ -113,6 +114,7 @@ function parseResponseBody(body: unknown): { request: ResponseRequest; stream: b
       sessionId,
       input: withAttachedFiles(input, files),
       agent,
+      profile,
       model,
       provider,
       reasoningEffort,
@@ -137,7 +139,7 @@ responsesRouter.post('/', async (req, res, next) => {
     // before the response begins: create-on-first-turn, or verify an existing
     // one. A missing binary throws ENOENT → 503 agent_unavailable (headers are
     // not sent yet); a bad client-supplied id throws validationError → 400.
-    const adapter = getAdapter(request.agent);
+    const adapter = getAdapter(request.agent, request.profile);
     if (adapter.resolveSession) {
       request.sessionId = await adapter.resolveSession(request.sessionId);
     }
@@ -191,6 +193,7 @@ responsesRouter.post('/', async (req, res, next) => {
           session_id: begun.sessionId,
           status: 'failed',
           agent: begun.agent,
+          profile: begun.profile,
           model: begun.model,
           provider: begun.provider,
           output_text: '',

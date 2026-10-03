@@ -19,7 +19,7 @@ export async function startTestServer(): Promise<TestServer> {
   process.env.NODE_ENV = 'test';
 
   const { default: app } = await import('../server/app.js');
-  const { getAdapter } = await import('../server/agent.js');
+  const { getAdapter, stopProfileAdapters } = await import('../server/agent.js');
   const { shutdownLiveRuns } = await import('../server/live-runs.js');
   const { SUPPORTED_AGENTS } = await import('../shared/types.js');
 
@@ -32,7 +32,7 @@ export async function startTestServer(): Promise<TestServer> {
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       shutdownLiveRuns();
-      await Promise.all(SUPPORTED_AGENTS.map((name) => getAdapter(name).stop?.()));
+      await Promise.all([...SUPPORTED_AGENTS.map((name) => getAdapter(name).stop?.()), stopProfileAdapters()]);
     },
   };
 }

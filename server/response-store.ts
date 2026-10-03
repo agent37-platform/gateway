@@ -48,6 +48,7 @@ export function insertResponse(input: {
   id: string;
   session_id: string;
   agent: AgentType;
+  profile?: string | null;
   model?: string | null;
   provider?: string | null;
   metadata?: Record<string, unknown> | null;
@@ -65,6 +66,7 @@ export function insertResponse(input: {
     session_id: input.session_id,
     status: 'in_progress',
     agent: input.agent,
+    profile: input.profile ?? null,
     model: input.model ?? null,
     provider: input.provider ?? null,
     output_text: '',

@@ -378,6 +378,7 @@ behind the host, which handles and forwards authentication.
 | --- | --- | --- |
 | `input` | string, required | The message or task. |
 | `agent` | string | `hermes`, `openclaw`, `claude-code`, `codex`, `opencode`, `grok`, or `pi`. Defaults to the gateway's configured default (`GATEWAY_DEFAULT_AGENT`, `hermes` out of the box). Routing is per request, so include it on every turn of a non-default session. |
+| `profile` | string | Hermes only: run the turn in the Hermes profile `~/.hermes/profiles/<profile>` (its own SOUL, skills, memory, config, and sessions). Omit, or pass `default`, for the instance's own Hermes home. Include it on every turn of the session and on the session reads (`?profile=`). Unknown profile: `404 profile_not_found`. |
 | `session_id` | string | Continue a conversation. Omit to start a new one. |
 | `files` | string[] | Absolute paths of files to attach (write them first with `PUT /v1/files/content`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
@@ -394,6 +395,7 @@ Non-streaming returns the finished response object:
   "session_id": "…",
   "status": "completed",          // in_progress | completed | failed | cancelled
   "agent": "hermes",
+  "profile": null,                // the Hermes profile the turn ran on; null = the default home
   "model": null,
   "provider": null,
   "output_text": "…",
@@ -442,6 +444,14 @@ running response as `active_response_id`.
 | Retrieve, with history | `GET /v1/sessions/{id}` → `{ id, agent, active_response_id, history, context }` (`?agent=` to pick the harness; `context` is the session's last reported context window, null until a turn reports one) |
 | Rename | `PATCH /v1/sessions/{id}` with `{ "title": "…" }` → `{ id, agent, renamed }`. Writes the title straight into the harness's own store (Hermes titles are length-capped and must be unique — a clash is `409 title_conflict`; OpenClaw stores it as the session label; Claude Code stores it as its custom session title; Codex stores it as the thread name; OpenCode stores it as the session title). A harness without an editable title (Grok, Pi) answers `405 rename_unsupported`. |
 | Delete | `DELETE /v1/sessions/{id}` |
+
+On Hermes, every sessions call takes `?profile=` to read that profile's own
+session store (omitted = the default Hermes home). Each profile runs in its own
+Hermes worker, started on first use and stopped after 10 idle minutes. Starting
+one stops the least recently used idle workers to keep at most
+`GATEWAY_MAX_PROFILE_WORKERS` (default 4) alive; a worker in the middle of a turn
+is never stopped, so many profiles busy at once can briefly run more.
+`GET /v1/models?profile=` reads that profile's config.
 
 `active_response_id` is the id of the `in_progress` response on the session, or
 null when it is idle. Harnesses persist a turn's messages at turn end, so while
@@ -576,6 +586,7 @@ Every error returns a stable, machine-readable body. Branch on `code`, show
 | `validation_error` | 400 | A request field was invalid (see `param`). |
 | `not_a_directory` | 400 | `GET /v1/files` or `GET /v1/files/archive` was given a path that isn't a directory. |
 | `response_not_found` | 404 | No response with that id. |
+| `profile_not_found` | 404 | No Hermes profile with that name on this instance. |
 | `file_not_found` | 404 | No file at that path. |
 | `not_found` | 404 | Unknown route. |
 | `session_busy` | 409 | A response is already running on the session. `error.response_id` names it — reattach via `GET /v1/responses/{id}/stream` or cancel it. |
