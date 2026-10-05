@@ -69,6 +69,15 @@ export function effortOptions(effort: ReasoningEffort | null | undefined): Pick<
   return { effort: EFFORT_MAP[effort] };
 }
 
+/** The public level those options actually run at: `ultra` is ultracode (still
+ *  our ultra), `none` is thinking off, and `minimal` rounds up to Claude Code's
+ *  floor of low. Exported for the mapping tests. */
+export function appliedEffort(effort: ReasoningEffort | null | undefined): ReasoningEffort | null {
+  if (!effort) return null;
+  if (effort === 'none' || effort === 'ultra') return effort;
+  return EFFORT_MAP[effort];
+}
+
 // Claude Code has no catalog command; its own /model picker is the SDK's
 // supportedModels() control request, which needs a live query. The answer is
 // the customer's own list — it names the versions each alias resolves to and
@@ -315,6 +324,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     // (the documented contract for client-supplied ids).
     const resume = existsSync(transcriptPath(uuid, cwd));
     const settings = options?.settings;
+    const applied = appliedEffort(settings?.reasoningEffort);
 
     // Streaming-input mode (the prompt as an async iterable) is the only mode
     // where interrupt() works. Keep stdin open until the turn has settled so
@@ -418,7 +428,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
     if (turn.interrupted) {
       // An interrupted result carries zeroed usage, not the partial turn's.
-      yield { type: 'done', sessionId, usage: null, interrupted: true };
+      yield { type: 'done', sessionId, usage: null, reasoningEffort: applied, interrupted: true };
     } else if (!result) {
       const detail = stderrTail.trim();
       yield { type: 'error', code: 'agent_error', error: `Claude Code exited before finishing the turn.${detail ? ` ${detail}` : ''}` };
@@ -432,6 +442,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         sessionId,
         usage: turnUsage(result),
         context: contextOf(lastAssistant, lastOutputTokens, result),
+        reasoningEffort: applied,
         interrupted: false,
       };
     }

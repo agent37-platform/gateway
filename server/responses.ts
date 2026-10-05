@@ -120,6 +120,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
   let outputText = '';
   let usage: TurnUsage | null = null;
   let context: ContextUsage | null = null;
+  let reasoningEffort: ReasoningEffort | null = null;
   let apiError: ApiError | null = null;
   let status: ResponseStatus = 'completed';
   let sawTerminal = false;
@@ -148,6 +149,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
           if (status !== 'failed') {
             usage = event.usage ?? null;
             context = event.context ?? null;
+            reasoningEffort = event.reasoningEffort ?? null;
             status = event.interrupted ? 'cancelled' : 'completed';
           }
           break;
@@ -176,7 +178,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
 
   // Record the terminal state, then release the session lock and end live
   // subscribers. The response store is an in-memory map, so neither call throws.
-  finalizeResponse(responseId, { status, output_text: outputText, usage, context, error: apiError, model, provider });
+  finalizeResponse(responseId, { status, output_text: outputText, usage, context, error: apiError, model, provider, reasoning_effort: reasoningEffort });
   markFinished(responseId, status);
   if (context) rememberSessionContext(sessionId, context);
 
@@ -189,6 +191,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
       profile,
       model,
       provider,
+      reasoning_effort: reasoningEffort,
       output_text: outputText,
       usage,
       context,

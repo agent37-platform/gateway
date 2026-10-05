@@ -39,6 +39,7 @@ interface ResponseBody {
   output_text: string;
   usage: unknown;
   context: { used_tokens: number; window_tokens: number } | null;
+  reasoning_effort: string | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -105,6 +106,10 @@ test('responses and sessions work end-to-end through the local LLM', async () =>
   );
   assertCompleted(created);
   assert.equal(created.metadata?.marker, marker);
+
+  // The turn reports the reasoning level it ran at. Hermes takes our ladder
+  // verbatim, so it is the one that was asked for.
+  assert.equal(created.reasoning_effort, 'low');
 
   // Hermes measures its context window every turn; the response reports it.
   assert.ok(created.context);

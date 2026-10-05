@@ -12,6 +12,7 @@ import type {
   AgentType,
   ApiError,
   ContextUsage,
+  ReasoningEffort,
   ResponseObject,
   ResponseStatus,
   TurnUsage,
@@ -69,6 +70,7 @@ export function insertResponse(input: {
     profile: input.profile ?? null,
     model: input.model ?? null,
     provider: input.provider ?? null,
+    reasoning_effort: null,
     output_text: '',
     usage: null,
     context: null,
@@ -92,6 +94,7 @@ export function finalizeResponse(
     error: ApiError | null;
     model: string | null;
     provider: string | null;
+    reasoning_effort: ReasoningEffort | null;
   },
 ): void {
   const response = responses.get(id);
@@ -103,6 +106,7 @@ export function finalizeResponse(
   response.error = fields.error;
   response.model = fields.model;
   response.provider = fields.provider;
+  response.reasoning_effort = fields.reasoning_effort;
   scheduleExpiry(id);
 }
 

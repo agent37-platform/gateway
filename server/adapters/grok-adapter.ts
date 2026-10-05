@@ -13,6 +13,7 @@ import type {
   SessionSummary,
   TurnUsage,
 } from '../../shared/types.js';
+import { publicReasoningEffort } from '../../shared/types.js';
 import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
 import { epochMillis } from './types.js';
 import { resolveWorkspaceDir } from '../paths.js';
@@ -219,6 +220,7 @@ export class GrokAdapter implements AgentAdapter {
     ];
     if (settings?.model) args.push('-m', settings.model);
     const effort = grokEffort(settings?.reasoningEffort);
+    const applied = publicReasoningEffort(effort);
     if (effort) args.push('--reasoning-effort', effort);
 
     const child = spawn(bin, args, { cwd, env: childEnv() });
@@ -294,7 +296,7 @@ export class GrokAdapter implements AgentAdapter {
     }
 
     if (turn.interrupted) {
-      yield { type: 'done', sessionId, usage: null, interrupted: true };
+      yield { type: 'done', sessionId, usage: null, reasoningEffort: applied, interrupted: true };
     } else if (errorEvent) {
       yield errorEvent;
     } else if (end) {
@@ -305,7 +307,7 @@ export class GrokAdapter implements AgentAdapter {
         output_tokens: output,
         cost_usd: end.total_cost_usd ?? null,
       };
-      yield { type: 'done', sessionId, usage, context: null, interrupted: false };
+      yield { type: 'done', sessionId, usage, context: null, reasoningEffort: applied, interrupted: false };
     } else {
       const detail = stderrTail.trim().split('\n').at(-1);
       yield { type: 'error', code: 'agent_error', error: detail || 'Grok ended the turn before it completed.' };

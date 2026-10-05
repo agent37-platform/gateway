@@ -35,6 +35,7 @@ interface ResponseBody {
   output_text: string;
   usage: { input_tokens: number; output_tokens: number; cost_usd: number | null } | null;
   context: { used_tokens: number; window_tokens: number } | null;
+  reasoning_effort: string | null;
   error: { code: string; message: string; hint?: string } | null;
 }
 
@@ -89,6 +90,29 @@ test('opencode responses complete, resume, and manage sessions on OpenCode\'s ow
   assert.equal(typeof created.usage.output_tokens, 'number');
   // OpenCode always reports a cost number (0 on free/unpriced models).
   assert.equal(typeof created.usage.cost_usd, 'number');
+
+  // The level the turn ran at. OpenCode advertises its variants per model and
+  // we clamp to what the model accepts rather than failing the turn, so this
+  // is `low` or the nearest level below it, never a level we did not send.
+  assert.ok(
+    created.reasoning_effort === null || ['minimal', 'low'].includes(created.reasoning_effort),
+    `unexpected reasoning_effort ${created.reasoning_effort}`,
+  );
+
+  // A model with no `low` variant still never reports the level we asked for
+  // when it could not run it: ask for the top of the ladder and read back
+  // whatever this model actually accepted.
+  const topped = await jsonOk<ResponseBody>(
+    await postJson(base, {
+      agent: 'opencode',
+      model,
+      input: 'Reply with just OK.',
+      reasoning_effort: 'ultra',
+    }),
+  );
+  assert.equal(topped.status, 'completed', JSON.stringify(topped.error));
+  // `ultra` is not an OpenCode variant: it runs at `max` or lower, never ultra.
+  assert.notEqual(topped.reasoning_effort, 'ultra');
 
   assert.deepEqual(await jsonOk(await fetch(`${base}/v1/health?agent=opencode`)), {
     ok: true,

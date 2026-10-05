@@ -6,6 +6,7 @@ import type {
   GoalDecision,
   GoalStateSnapshot,
   HermesMessage,
+  ReasoningEffort,
   SessionMetadata,
   SessionSummary,
   TurnUsage,
@@ -48,6 +49,9 @@ export interface StreamEvent {
   args?: Record<string, unknown>;
   context?: ContextUsage | null;
   usage?: TurnUsage | null;
+  /** On `done`: the public reasoning level the adapter actually ran the turn
+   *  at, after any per-model clamping. Null/absent when it set none. */
+  reasoningEffort?: ReasoningEffort | null;
   interrupted?: boolean;
 }
 

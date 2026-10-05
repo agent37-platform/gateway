@@ -16,6 +16,17 @@
 export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
+/** The public level a harness's own spelling names, for reporting back the
+ *  effort a turn actually ran at. Every harness names its levels out of our
+ *  vocabulary (plus `off` for `none`), so this is a lookup rather than a
+ *  per-adapter reverse table. Null when the adapter set no explicit level and
+ *  the harness used its own default. */
+export function publicReasoningEffort(native: string | null | undefined): ReasoningEffort | null {
+  if (!native) return null;
+  if (native === 'off') return 'none';
+  return (REASONING_EFFORTS as readonly string[]).includes(native) ? (native as ReasoningEffort) : null;
+}
+
 /** Response modes. `chat` runs one turn; `goal` is reserved for a fast-follow. */
 export const RESPONSE_MODES = ['chat', 'goal'] as const;
 
@@ -95,6 +106,12 @@ export interface ResponseObject {
   profile: string | null;
   model: string | null;
   provider: string | null;
+  /** The reasoning level the turn actually ran at. Usually the requested one,
+   *  but harnesses advertise their supported levels per model (Codex, OpenCode)
+   *  and we clamp to the nearest one a model accepts rather than failing the
+   *  turn, so this is how a caller sees a level it did not get. Null when the
+   *  request named none and the harness used its own default. */
+  reasoning_effort: ReasoningEffort | null;
   output_text: string;
   usage: TurnUsage | null;
   /** Null when the harness didn't report a context measurement for the turn. */
