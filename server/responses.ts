@@ -173,7 +173,7 @@ export async function driveResponse(begun: BegunResponse, input: string): Promis
   if (status === 'failed' && apiError) {
     emit(responseId, { event: 'response.failed', data: { error: apiError } });
   } else {
-    emit(responseId, { event: 'response.completed', data: { output_text: outputText, usage, context } });
+    emit(responseId, { event: 'response.completed', data: { output_text: outputText, usage, context, reasoning_effort: reasoningEffort } });
   }
 
   // Record the terminal state, then release the session lock and end live
@@ -229,7 +229,12 @@ export function synthesizeStreamEvents(response: ResponseObject): ResponseStream
   } else {
     events.push({
       event: 'response.completed',
-      data: { output_text: response.output_text, usage: response.usage, context: response.context },
+      data: {
+        output_text: response.output_text,
+        usage: response.usage,
+        context: response.context,
+        reasoning_effort: response.reasoning_effort,
+      },
     });
   }
   return events;

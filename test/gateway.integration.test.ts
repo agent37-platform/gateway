@@ -213,6 +213,9 @@ test('streaming responses can be replayed', async () => {
   assert.equal(events.at(-1)?.event, 'response.completed');
   assert.ok(events.some((event) => event.event === 'response.output_text.delta'));
   assert.ok(events.at(-1)?.data.context); // context rides the completed event
+  // …and so does the applied reasoning level, so a streaming caller never has
+  // to re-fetch the response just to learn what the turn ran under.
+  assert.equal(events.at(-1)?.data.reasoning_effort, 'low');
 
   const responseId = events[0].data.id as string;
 
@@ -221,6 +224,8 @@ test('streaming responses can be replayed', async () => {
   const replayEvents = await new SseReader(replay).drain();
   assert.equal(replayEvents[0]?.event, 'response.created');
   assert.equal(replayEvents.at(-1)?.event, 'response.completed');
+  // The replay is rebuilt from stored state, so it carries the field too.
+  assert.equal(replayEvents.at(-1)?.data.reasoning_effort, 'low');
 });
 
 test('a tool call is announced while its arguments stream, then started with them', async () => {

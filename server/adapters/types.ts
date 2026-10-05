@@ -49,8 +49,8 @@ export interface StreamEvent {
   args?: Record<string, unknown>;
   context?: ContextUsage | null;
   usage?: TurnUsage | null;
-  /** On `done`: the public reasoning level the adapter actually ran the turn
-   *  at, after any per-model clamping. Null/absent when it set none. */
+  /** On `done`: the public reasoning level the adapter applied to the turn,
+   *  after any per-model clamping it can do. Null/absent when it set none. */
   reasoningEffort?: ReasoningEffort | null;
   interrupted?: boolean;
 }

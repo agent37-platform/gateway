@@ -106,11 +106,16 @@ export interface ResponseObject {
   profile: string | null;
   model: string | null;
   provider: string | null;
-  /** The reasoning level the turn actually ran at. Usually the requested one,
-   *  but harnesses advertise their supported levels per model (Codex, OpenCode)
-   *  and we clamp to the nearest one a model accepts rather than failing the
-   *  turn, so this is how a caller sees a level it did not get. Null when the
-   *  request named none and the harness used its own default. */
+  /** The reasoning level the gateway applied to this turn: the requested one
+   *  mapped onto the harness's own ladder, then clamped to what the target
+   *  model advertises on the harnesses that publish that (Codex, OpenCode), so
+   *  a caller sees a level it asked for but did not get. Null when the request
+   *  named none and the harness used its own default.
+   *
+   *  It is what we sent, not a reading taken from the model: a harness that
+   *  quietly lowers the level again (pi and grok both can, and neither reports
+   *  the level it ran) is invisible to us, so treat this as the ceiling the
+   *  turn ran under rather than a measurement. */
   reasoning_effort: ReasoningEffort | null;
   output_text: string;
   usage: TurnUsage | null;
@@ -193,7 +198,7 @@ export type ResponseStreamEvent =
   | { event: 'response.tool_call.started'; data: { tool: string; label?: string; arguments?: Record<string, unknown> } }
   | { event: 'response.tool_call.completed'; data: { tool: string; duration_ms?: number } }
   | { event: 'response.tool_call.failed'; data: { tool: string; error?: string } }
-  | { event: 'response.completed'; data: { output_text: string; usage: TurnUsage | null; context: ContextUsage | null } }
+  | { event: 'response.completed'; data: { output_text: string; usage: TurnUsage | null; context: ContextUsage | null; reasoning_effort: ReasoningEffort | null } }
   | { event: 'response.failed'; data: { error: ApiError } };
 
 export type ResponseStreamEventName = ResponseStreamEvent['event'];
