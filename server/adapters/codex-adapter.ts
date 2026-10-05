@@ -9,6 +9,7 @@ import type {
   SessionSummary,
   TurnUsage,
 } from '../../shared/types.js';
+import { publicReasoningEffort } from '../../shared/types.js';
 import type { AgentAdapter, AgentRunOptions, ContextUsage, StreamEvent } from './types.js';
 import { epochMillis } from './types.js';
 import { resolveWorkspaceDir } from '../paths.js';
@@ -233,6 +234,7 @@ export class CodexAdapter implements AgentAdapter {
     let lastBreakdown: ThreadTokenUsage['last'] | undefined;
     let contextWindow: number | null | undefined;
     let finalTurn: CodexTurn | undefined;
+    let appliedEffort: ReasoningEffort | null = null;
 
     try {
       // A logged-out turn would otherwise spend ~15s retrying a 401; a cheap
@@ -249,6 +251,7 @@ export class CodexAdapter implements AgentAdapter {
       const model = settings?.model ?? undefined;
       const nominal = codexEffort(settings?.reasoningEffort);
       const effort = clampEffort(nominal, model ? this.modelEfforts.get(model) : undefined);
+      appliedEffort = publicReasoningEffort(effort);
 
       for await (const n of client.runTurn(
         sessionId,
@@ -329,9 +332,9 @@ export class CodexAdapter implements AgentAdapter {
     if (!finalTurn) {
       yield { type: 'error', code: 'agent_error', error: 'Codex ended the turn before it completed.' };
     } else if (finalTurn.status === 'interrupted') {
-      yield { type: 'done', sessionId, usage: null, interrupted: true };
+      yield { type: 'done', sessionId, usage: null, reasoningEffort: appliedEffort, interrupted: true };
     } else if (finalTurn.status === 'completed') {
-      yield { type: 'done', sessionId, usage, context, interrupted: false };
+      yield { type: 'done', sessionId, usage, context, reasoningEffort: appliedEffort, interrupted: false };
     } else {
       yield turnErrorEvent(finalTurn.error);
     }

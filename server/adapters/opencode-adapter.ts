@@ -9,6 +9,7 @@ import type {
   SessionSummary,
   TurnUsage,
 } from '../../shared/types.js';
+import { publicReasoningEffort } from '../../shared/types.js';
 import type { AgentAdapter, AgentRunOptions, ContextUsage, StreamEvent } from './types.js';
 import { AsyncQueue, IdleChild } from './idle-child.js';
 import { resolveWorkspaceDir } from '../paths.js';
@@ -414,7 +415,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     if (!settled) settled = { ok: false, error: new Error('OpenCode turn did not settle.') };
 
     if (turn.interrupted) {
-      yield { type: 'done', sessionId, usage: null, interrupted: true };
+      yield { type: 'done', sessionId, usage: null, reasoningEffort: publicReasoningEffort(variant), interrupted: true };
       return;
     }
     if (!settled.ok) {
@@ -429,7 +430,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     const failure = info.error ?? streamError;
     if (failure) {
       if (failure.name === 'MessageAbortedError') {
-        yield { type: 'done', sessionId, usage: null, interrupted: true };
+        yield { type: 'done', sessionId, usage: null, reasoningEffort: publicReasoningEffort(variant), interrupted: true };
         return;
       }
       yield errorEvent(failure);
@@ -470,7 +471,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     const window = info.providerID && info.modelID ? this.providersCache?.windows.get(`${info.providerID}/${info.modelID}`) : undefined;
     const context: ContextUsage | null = window && used > 0 ? { used_tokens: used, window_tokens: window } : null;
 
-    yield { type: 'done', sessionId, usage, context, interrupted: false };
+    yield { type: 'done', sessionId, usage, context, reasoningEffort: publicReasoningEffort(variant), interrupted: false };
   }
 
   async interruptChat(sessionId: string): Promise<boolean> {

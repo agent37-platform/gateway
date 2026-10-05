@@ -383,7 +383,7 @@ behind the host, which handles and forwards authentication.
 | `files` | string[] | Absolute paths of files to attach (write them first with `PUT /v1/files/content`). Appended to the message as an `[Attached files: …]` block; the agent reads them from disk. |
 | `stream` | boolean | `true` for Server-Sent Events; default `false`. |
 | `model` / `provider` | string | The LLM to run on. List options at `GET /v1/models`. |
-| `reasoning_effort` | string | `none` … `ultra` (`max` = top plain thinking; `ultra` = top thinking plus the harness's orchestration mode). |
+| `reasoning_effort` | string | `none` … `ultra` (`max` = top plain thinking; `ultra` = top thinking plus the harness's orchestration mode). Codex and OpenCode advertise their levels per model, so a level a model does not accept is clamped to the nearest one below it rather than failing the turn; the response's `reasoning_effort` reports what was applied. |
 | `mode` | string | `chat` (default). `goal` is reserved (returns `validation_error` for now). |
 | `metadata` | object | Up to 16 key/value pairs, echoed back. |
 
@@ -398,6 +398,7 @@ Non-streaming returns the finished response object:
   "profile": null,                // the Hermes profile the turn ran on; null = the default home
   "model": null,
   "provider": null,
+  "reasoning_effort": "high",     // the level APPLIED to the turn, which is not always the one requested; null when none was sent and the harness used its own default
   "output_text": "…",
   "usage": { "input_tokens": 1840, "output_tokens": 920, "cost_usd": 0.0137 },
   "context": { "used_tokens": 22600, "window_tokens": 256000 }, // tokens occupying the model's context window; null when the harness can't measure it
@@ -418,8 +419,21 @@ With `stream: true` the body is a Server-Sent Events stream of named events:
 | `response.tool_call.started` | `{ tool, label?, arguments? }`, `label` is the harness's one-line summary, `arguments` the tool's input, long values clipped (Hermes) |
 | `response.tool_call.completed` | `{ tool, duration_ms? }` |
 | `response.tool_call.failed` | `{ tool, error? }` |
-| `response.completed` | `{ output_text, usage, context }` |
+| `response.completed` | `{ output_text, usage, context, reasoning_effort }` |
 | `response.failed` | `{ error: { code, message } }` |
+
+`reasoning_effort` on the response is the level we applied to the turn. Every
+harness takes our one ladder, but each maps it onto its own: Hermes and OpenClaw
+run all eight; Claude Code, Codex, OpenCode, grok and pi have no level of their
+own for some rungs, and Codex and OpenCode further advertise which levels each
+*model* supports. Rather than reject a turn, we clamp to the nearest level the
+model accepts. Read this field instead of assuming the request was honoured
+(ask OpenCode for `ultra` and you get `max` or lower back).
+
+It is what we sent, not a reading taken from the model. A harness that lowers
+the level again on its own is invisible here: pi clamps to the model's limits
+and grok's non-reasoning models ignore the flag outright, and neither reports
+the level it ran. Treat the field as the ceiling the turn ran under.
 
 A turn ends with the agent's final answer. On Hermes, delegated subagents run
 inside the turn, so a `delegate_task` call can sit between `started` and

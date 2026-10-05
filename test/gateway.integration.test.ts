@@ -39,6 +39,7 @@ interface ResponseBody {
   output_text: string;
   usage: unknown;
   context: { used_tokens: number; window_tokens: number } | null;
+  reasoning_effort: string | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -105,6 +106,10 @@ test('responses and sessions work end-to-end through the local LLM', async () =>
   );
   assertCompleted(created);
   assert.equal(created.metadata?.marker, marker);
+
+  // The turn reports the reasoning level it ran at. Hermes takes our ladder
+  // verbatim, so it is the one that was asked for.
+  assert.equal(created.reasoning_effort, 'low');
 
   // Hermes measures its context window every turn; the response reports it.
   assert.ok(created.context);
@@ -208,6 +213,9 @@ test('streaming responses can be replayed', async () => {
   assert.equal(events.at(-1)?.event, 'response.completed');
   assert.ok(events.some((event) => event.event === 'response.output_text.delta'));
   assert.ok(events.at(-1)?.data.context); // context rides the completed event
+  // …and so does the applied reasoning level, so a streaming caller never has
+  // to re-fetch the response just to learn what the turn ran under.
+  assert.equal(events.at(-1)?.data.reasoning_effort, 'low');
 
   const responseId = events[0].data.id as string;
 
@@ -216,6 +224,8 @@ test('streaming responses can be replayed', async () => {
   const replayEvents = await new SseReader(replay).drain();
   assert.equal(replayEvents[0]?.event, 'response.created');
   assert.equal(replayEvents.at(-1)?.event, 'response.completed');
+  // The replay is rebuilt from stored state, so it carries the field too.
+  assert.equal(replayEvents.at(-1)?.data.reasoning_effort, 'low');
 });
 
 test('a tool call is announced while its arguments stream, then started with them', async () => {

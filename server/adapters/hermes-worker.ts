@@ -527,6 +527,10 @@ export class HermesWorkerAdapter implements AgentAdapter, GoalCapableAdapter {
             sessionId: event.sessionId ?? sessionId,
             context: event.context,
             usage: event.usage,
+            // Hermes takes our ladder verbatim, so what we sent is what ran.
+            // A turn that sent none runs on the instance's configured default,
+            // which the worker resolves and we deliberately don't guess at.
+            reasoningEffort: options?.settings?.reasoningEffort ?? null,
             interrupted: event.interrupted,
           };
           break;

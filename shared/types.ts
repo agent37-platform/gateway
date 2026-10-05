@@ -16,6 +16,17 @@
 export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
+/** The public level a harness's own spelling names, for reporting back the
+ *  effort a turn actually ran at. Every harness names its levels out of our
+ *  vocabulary (plus `off` for `none`), so this is a lookup rather than a
+ *  per-adapter reverse table. Null when the adapter set no explicit level and
+ *  the harness used its own default. */
+export function publicReasoningEffort(native: string | null | undefined): ReasoningEffort | null {
+  if (!native) return null;
+  if (native === 'off') return 'none';
+  return (REASONING_EFFORTS as readonly string[]).includes(native) ? (native as ReasoningEffort) : null;
+}
+
 /** Response modes. `chat` runs one turn; `goal` is reserved for a fast-follow. */
 export const RESPONSE_MODES = ['chat', 'goal'] as const;
 
@@ -95,6 +106,17 @@ export interface ResponseObject {
   profile: string | null;
   model: string | null;
   provider: string | null;
+  /** The reasoning level the gateway applied to this turn: the requested one
+   *  mapped onto the harness's own ladder, then clamped to what the target
+   *  model advertises on the harnesses that publish that (Codex, OpenCode), so
+   *  a caller sees a level it asked for but did not get. Null when the request
+   *  named none and the harness used its own default.
+   *
+   *  It is what we sent, not a reading taken from the model: a harness that
+   *  quietly lowers the level again (pi and grok both can, and neither reports
+   *  the level it ran) is invisible to us, so treat this as the ceiling the
+   *  turn ran under rather than a measurement. */
+  reasoning_effort: ReasoningEffort | null;
   output_text: string;
   usage: TurnUsage | null;
   /** Null when the harness didn't report a context measurement for the turn. */
@@ -176,7 +198,7 @@ export type ResponseStreamEvent =
   | { event: 'response.tool_call.started'; data: { tool: string; label?: string; arguments?: Record<string, unknown> } }
   | { event: 'response.tool_call.completed'; data: { tool: string; duration_ms?: number } }
   | { event: 'response.tool_call.failed'; data: { tool: string; error?: string } }
-  | { event: 'response.completed'; data: { output_text: string; usage: TurnUsage | null; context: ContextUsage | null } }
+  | { event: 'response.completed'; data: { output_text: string; usage: TurnUsage | null; context: ContextUsage | null; reasoning_effort: ReasoningEffort | null } }
   | { event: 'response.failed'; data: { error: ApiError } };
 
 export type ResponseStreamEventName = ResponseStreamEvent['event'];

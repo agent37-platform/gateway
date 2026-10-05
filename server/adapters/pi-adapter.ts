@@ -14,6 +14,7 @@ import type {
   SessionSummary,
   TurnUsage,
 } from '../../shared/types.js';
+import { publicReasoningEffort } from '../../shared/types.js';
 import type { AgentAdapter, AgentRunOptions, StreamEvent } from './types.js';
 import { epochMillis } from './types.js';
 import { resolveWorkspaceDir } from '../paths.js';
@@ -256,6 +257,7 @@ export class PiAdapter implements AgentAdapter {
     if (settings?.provider) args.push('--provider', settings.provider);
     if (settings?.model) args.push('--model', settings.model);
     const thinking = piThinking(settings?.reasoningEffort);
+    const applied = publicReasoningEffort(thinking);
     if (thinking) args.push('--thinking', thinking);
 
     const child = spawn(bin, args, { cwd: workspaceCwd(), env: childEnv() });
@@ -349,7 +351,7 @@ export class PiAdapter implements AgentAdapter {
     }
 
     if (turn.interrupted) {
-      yield { type: 'done', sessionId, usage: null, interrupted: true };
+      yield { type: 'done', sessionId, usage: null, reasoningEffort: applied, interrupted: true };
     } else if (errorEvent) {
       yield errorEvent;
     } else if (settled) {
@@ -358,7 +360,7 @@ export class PiAdapter implements AgentAdapter {
         output_tokens: outputTokens,
         cost_usd: costUsd > 0 ? costUsd : null,
       };
-      yield { type: 'done', sessionId, usage, context: null, interrupted: false };
+      yield { type: 'done', sessionId, usage, context: null, reasoningEffort: applied, interrupted: false };
     } else {
       // Pi refuses an unresolvable model, and a model it has no key for, before
       // the stream opens: the reason is the first real line of stderr (the

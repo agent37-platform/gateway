@@ -3,8 +3,8 @@
 // thinking param must stay in lockstep as levels are added.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { REASONING_EFFORTS } from '../shared/types.js';
-import { effortOptions } from '../server/adapters/claude-code-adapter.js';
+import { REASONING_EFFORTS, publicReasoningEffort } from '../shared/types.js';
+import { appliedEffort, effortOptions } from '../server/adapters/claude-code-adapter.js';
 import { THINKING_MAP } from '../server/adapters/openclaw-adapter.js';
 import { codexEffort } from '../server/adapters/codex-adapter.js';
 import { opencodeVariant } from '../server/adapters/opencode-adapter.js';
@@ -94,4 +94,59 @@ test('pi: none is off, the rest map by name, ultra floors to max', () => {
   assert.equal(piThinking('xhigh'), 'xhigh');
   assert.equal(piThinking('max'), 'max');
   assert.equal(piThinking('ultra'), 'max');
+});
+
+// --- What we report back: `reasoning_effort` on the response object ----------
+// The turn runs at the level the harness accepted, which is not always the one
+// that was asked for. Every harness's own spelling has to land back on the
+// public ladder, or a caller reads a level we never ran.
+
+test('publicReasoningEffort maps a harness spelling back to the public ladder', () => {
+  assert.equal(publicReasoningEffort(null), null);
+  assert.equal(publicReasoningEffort(undefined), null);
+  assert.equal(publicReasoningEffort(''), null);
+  // `off` is pi's and OpenClaw's spelling of thinking disabled.
+  assert.equal(publicReasoningEffort('off'), 'none');
+  for (const effort of REASONING_EFFORTS) assert.equal(publicReasoningEffort(effort), effort);
+  // A level we don't publish is reported as none-set rather than invented.
+  assert.equal(publicReasoningEffort('turbo'), null);
+});
+
+test('every harness spelling round-trips to a public level', () => {
+  for (const effort of REASONING_EFFORTS) {
+    assert.ok(publicReasoningEffort(codexEffort(effort)), `codex ${effort} does not round-trip`);
+    assert.ok(publicReasoningEffort(grokEffort(effort)), `grok ${effort} does not round-trip`);
+    assert.ok(publicReasoningEffort(THINKING_MAP[effort]), `openclaw ${effort} does not round-trip`);
+    assert.ok(publicReasoningEffort(piThinking(effort)), `pi ${effort} does not round-trip`);
+    assert.ok(appliedEffort(effort), `claude-code ${effort} does not round-trip`);
+    // OpenCode's `none` is "send no variant", so it alone reports nothing.
+    if (effort !== 'none') {
+      assert.ok(publicReasoningEffort(opencodeVariant(effort)), `opencode ${effort} does not round-trip`);
+    }
+  }
+  assert.equal(publicReasoningEffort(opencodeVariant('none')), null);
+});
+
+test('a level the harness cannot run is reported as the one it ran', () => {
+  // The whole point of the field: these are the turns where what we report
+  // differs from what was asked for.
+  assert.equal(publicReasoningEffort(grokEffort('ultra')), 'max');
+  assert.equal(publicReasoningEffort(piThinking('ultra')), 'max');
+  assert.equal(publicReasoningEffort(opencodeVariant('ultra')), 'max');
+  assert.equal(publicReasoningEffort(codexEffort('minimal')), 'low');
+  assert.equal(appliedEffort('minimal'), 'low');
+});
+
+test('claude-code: appliedEffort matches the options effortOptions builds', () => {
+  assert.equal(appliedEffort(null), null);
+  assert.equal(appliedEffort(undefined), null);
+  assert.equal(appliedEffort('none'), 'none');
+  assert.equal(appliedEffort('minimal'), 'low');
+  assert.equal(appliedEffort('low'), 'low');
+  assert.equal(appliedEffort('medium'), 'medium');
+  assert.equal(appliedEffort('high'), 'high');
+  assert.equal(appliedEffort('xhigh'), 'xhigh');
+  assert.equal(appliedEffort('max'), 'max');
+  // ultra is xhigh + ultracode, which is our ultra, not a downgrade to xhigh.
+  assert.equal(appliedEffort('ultra'), 'ultra');
 });

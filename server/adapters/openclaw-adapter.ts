@@ -8,6 +8,7 @@ import type {
   SessionSummary,
   TurnUsage,
 } from '../../shared/types.js';
+import { publicReasoningEffort } from '../../shared/types.js';
 import type { AgentAdapter, AgentRunOptions, ContextUsage, StreamEvent } from './types.js';
 import { epochMillis } from './types.js';
 import { OpenClawSocket, type OpenClawEvent } from './openclaw-ws.js';
@@ -166,6 +167,7 @@ export class OpenClawAdapter implements AgentAdapter {
     // Reasoning IS per-turn: chat.send's `thinking` overrides the session
     // level for this run only.
     const thinking = settings?.reasoningEffort ? THINKING_MAP[settings.reasoningEffort] : undefined;
+    const applied = publicReasoningEffort(thinking);
 
     // Buffer events from subscription time so nothing lands between the
     // chat.send ack and the first read.
@@ -198,7 +200,7 @@ export class OpenClawAdapter implements AgentAdapter {
       // terminal here, or the stream would wait forever and wedge the
       // session behind session_busy.
       if (ack.status !== 'started') {
-        yield { type: 'done', sessionId, usage: null, interrupted: true };
+        yield { type: 'done', sessionId, usage: null, reasoningEffort: applied, interrupted: true };
         return;
       }
 
@@ -270,11 +272,11 @@ export class OpenClawAdapter implements AgentAdapter {
             let message = chat.message;
             if (!message?.usage) message = (await this.lastAssistantMessage(sessionId)) ?? message;
             const usage = usageFrom(message, chat.usage);
-            yield { type: 'done', sessionId, usage, context: await this.contextUsage(message), interrupted: false };
+            yield { type: 'done', sessionId, usage, context: await this.contextUsage(message), reasoningEffort: applied, interrupted: false };
             return;
           }
           case 'aborted':
-            yield { type: 'done', sessionId, usage: usageFrom(chat.message, chat.usage), interrupted: true };
+            yield { type: 'done', sessionId, usage: usageFrom(chat.message, chat.usage), reasoningEffort: applied, interrupted: true };
             return;
           case 'error':
             yield {
