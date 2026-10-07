@@ -270,7 +270,12 @@ def project_session_messages(session_id: Any, task_id: Any = None) -> dict[str, 
                         "created_at": _timestamp_to_ms(row.get("timestamp")),
                     })
                     compaction_seen = True
-                    child_user_seen = False
+                    # Only a compression CHILD waits for the user to speak again; the
+                    # root session already carries the prompt, so muting it here would
+                    # drop the rest of a turn that compacted mid-flight (a scheduled
+                    # task never sends a second user message).
+                    if not is_root_session:
+                        child_user_seen = False
                     continue
                 if not compaction_seen:
                     continue
